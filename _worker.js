@@ -16,7 +16,19 @@ const AGENTS = {
   'Gemini': { role: '빠른 리서치 · 상위노출 분석', color: '#2dd4bf', emoji: '🐰' },
   '코덱스': { role: '코드 · 자동화 · 회의실 개발', color: '#60a5fa', emoji: '🦈' },
   '의장': { role: '회의 진행 · 역할 배정', color: '#8b5cf6', emoji: '🤖' },
+  '부이~': { role: '조사 · 가격 비교 · 정리', color: '#f0b070', emoji: '🦊' },
 };
+
+const AGENT_ALIASES = { '브이': '부이~', '부이': '부이~', '부이~': '부이~', v: '부이~',
+  gemini: 'Gemini', '재미나이': 'Gemini', codex: '코덱스', '코덱스': '코덱스', claude: '클로드', '클로드': '클로드' };
+function canonicalAgent(value) {
+  const name = String(value || '').trim();
+  return AGENT_ALIASES[name.toLowerCase()] || name;
+}
+function normalizeMentions(content) {
+  return String(content || '').replace(/(^|[\s(])@([가-힣A-Za-z0-9_~]+)/g,
+    (_all, prefix, name) => prefix + '@' + canonicalAgent(name));
+}
 
 // 방 목록은 D1 의 rooms 테이블이 기준입니다. (schema.sql 기본값: general / instagram / blog / store / later)
 
@@ -42,7 +54,7 @@ function text(body, status = 200, type = 'text/plain; charset=utf-8') {
 
 // 이름이 AGENTS 에 있으면 역할 배지를, 없으면 '참여자' 배지를 붙입니다.
 function meta(sender) {
-  const raw = String(sender == null ? '' : sender).trim();
+  const raw = canonicalAgent(sender);
   if (AGENTS[raw]) {
     const a = AGENTS[raw];
     return { name: raw, role: a.role, color: a.color, emoji: a.emoji };
@@ -84,7 +96,7 @@ function decorate(row) {
     role: m.role,
     color: m.color,
     emoji: m.emoji,
-    content: row.content,
+    content: normalizeMentions(row.content),
     reply_to_id: row.reply_to_id || null,
     created_at: row.created_at,
   };
@@ -116,7 +128,7 @@ async function attachReplies(env, messages, slug) {
       ? {
           id: parent.id,
           sender: meta(parent.sender).name,
-          content: String(parent.content).slice(0, 300),
+          content: normalizeMentions(parent.content).slice(0, 300),
         }
       : null;
   }
@@ -208,8 +220,8 @@ async function listMessages(env, slug, after, limit) {
 }
 
 async function postMessage(env, slug, payload) {
-  const sender = String(payload.sender || '').trim();
-  const content = String(payload.content || '').trim();
+  const sender = canonicalAgent(payload.sender);
+  const content = normalizeMentions(String(payload.content || '').trim());
   const att = payload.attachment && typeof payload.attachment === 'object' ? payload.attachment : null;
   if (!sender) return { error: 'sender 가 필요합니다.', status: 400 };
   if (!content && !att) return { error: 'content 또는 attachment 가 필요합니다.', status: 400 };
@@ -263,6 +275,7 @@ async function postMessage(env, slug, payload) {
     .first();
   const messages = [decorate(row)];
   await attachReplies(env, messages, slug);
+  if (sender !== CHAIR_NAME) await syncChecklistFromMessage(env, row);
   return { message: messages[0] };
 }
 
@@ -295,6 +308,11 @@ async function ensureChecklistTable(env) {
   try { await env.DB.prepare(`alter table checklist add column detail text`).run(); } catch (e) {}
   try { await env.DB.prepare(`alter table checklist add column link text`).run(); } catch (e) {}
   try { await env.DB.prepare(`alter table checklist add column progress integer not null default 0`).run(); } catch (e) {}
+  try { await env.DB.prepare(`alter table checklist add column updated_at text`).run(); } catch (e) {}
+  try { await env.DB.prepare(`alter table checklist add column approved_at text`).run(); } catch (e) {}
+  await env.DB.prepare(`create table if not exists automation_events (
+    event_key text primary key, created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  )`).run();
 }
 
 function checklistRow(row) {
@@ -302,7 +320,7 @@ function checklistRow(row) {
     id: row.id,
     title: row.title,
     group_name: row.group_name || '',
-    assignee: row.assignee || '',
+    assignee: canonicalAgent(row.assignee),
     status: row.status,
     source: row.source || '',
     reason: row.reason || '',
@@ -335,13 +353,70 @@ const CHAIR_NAME = '의장';
 // 토큰 절약: 의논도 최대 2명까지만 부릅니다 (담당자 + 뮤즈 정리). 5명 전원 호출은 토큰만 먹어요.
 
 // 키워드로 담당 AI를 정합니다.
-function routeQuestion(content) {
+function routeQuestion(content, room = 'general') {
   const t = String(content || '');
-  if (/인스타|릴스|카드뉴스|숏츠|스레드|지비|하하|유닉/.test(t)) return '피클1';
-  if (/블로그|원고|카페|체험단|글쓰기/.test(t)) return '클로드';
-  if (/순위|분석|상위노출|노출|검색|데이터랩/.test(t)) return 'Gemini';
-  if (/코드|자동화|개발|회의실|디자인|버그|에러/.test(t)) return '코덱스';
-  return '뮤즈';
+  const mentions = [...normalizeMentions(t).matchAll(/(?:^|[\s(])@([가-힣A-Za-z0-9_~]+)/g)];
+  const named = mentions.map((m) => canonicalAgent(m[1])).find((name) => AGENTS[name] && !['똑똑이', '의장'].includes(name));
+  if (named) return named;
+  return ({ instagram: '피클1', threads: '피클2', blog: '클로드', store: 'Gemini' })[room] || '뮤즈';
+}
+
+function isQuestion(content) {
+  const t = String(content || '').trim();
+  return /[?？]|어떻|어디|왜|뭐|무엇|언제|누가|얼마|가능한가|맞나요|인가요|할까|될까|되나요|있나요|없나요/.test(t);
+}
+
+function messageTaskUpdate(content) {
+  const t = String(content || '');
+  const ids = [...new Set([...t.matchAll(/#(\d+)\b/g)].map((m) => Number(m[1])))];
+  const done = /(?:^|\n)\s*(?:#\d+\s*)?(?:완료(?:했습니다|했어요|됨|입니다)?[.!]?|✅)\s*(?:$|\n|:)/.test(t);
+  const progress = /진행률\s*[:：]?\s*(100|[1-9]?\d)\s*%/.exec(t);
+  return { ids, done, progress: progress ? Number(progress[1]) : null };
+}
+
+async function syncChecklistFromMessage(env, message) {
+  const update = messageTaskUpdate(message.content);
+  if (!update.done && update.progress === null) return;
+  await ensureChecklistTable(env);
+  let ids = update.ids;
+  let parentId = message.reply_to_id;
+  // Only follow this reply chain; an unscoped completion never finishes all tasks.
+  for (let depth = 0; !ids.length && parentId && depth < 6; depth++) {
+    const parent = await env.DB.prepare('select * from messages where id = ? and room_slug = ?').bind(parentId, message.room_slug).first();
+    if (!parent) break;
+    ids = messageTaskUpdate(parent.content).ids;
+    if (!ids.length) {
+      const rows = await env.DB.prepare('select id, title from checklist where status in (\'todo\', \'waiting\')').all();
+      const matches = (rows.results || []).filter((item) => parent.content.includes(item.title));
+      if (matches.length === 1) ids = [matches[0].id];
+    }
+    parentId = parent.reply_to_id;
+  }
+  for (const id of ids) {
+    if (update.done && ids.length > 1 &&
+      !new RegExp('(?:^|\\n)\\s*#' + id + '\\s*(?:완료(?:했습니다|했어요|됨|입니다)?[.!]?|✅)\\s*(?:$|\\n|:)').test(message.content)) continue;
+    const item = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
+    if (!item || item.status === 'rejected' || (!update.done && item.status === 'done')) continue;
+    const sender = canonicalAgent(message.sender);
+    if (!['똑똑이', '뮤즈', canonicalAgent(item.assignee)].includes(sender)) continue;
+    const status = update.done ? 'done' : item.status;
+    const progress = update.done ? 100 : update.progress;
+    await env.DB.prepare("update checklist set status = ?, progress = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') where id = ?")
+      .bind(status, progress, id).run();
+  }
+}
+
+async function sendAutomationOnce(env, key, room, payload) {
+  const claim = await env.DB.prepare('insert or ignore into automation_events (event_key) values (?)').bind(key).run();
+  if (!claim.meta || !claim.meta.changes) return false;
+  try {
+    const result = await postMessage(env, room, payload);
+    if (result.error) throw new Error(result.error);
+    return true;
+  } catch (error) {
+    await env.DB.prepare('delete from automation_events where event_key = ?').bind(key).run();
+    throw error;
+  }
 }
 
 // 할 일 제목·담당자로 그 일이 있는 방을 정합니다 (방으로 가기·재촉용).
@@ -364,30 +439,37 @@ function questionSummary(content) {
 }
 
 async function runChair(env) {
+  await ensureChecklistTable(env);
   const rooms = await roomList(env);
   for (const room of rooms) {
     // 최근 10분 안의 똑똑이님 메시지 (오래된 순)
     const res = await env.DB.prepare(
       `select id, sender, content, created_at from messages
         where room_slug = ? and sender = '똑똑이'
-          and datetime(created_at) >= datetime('now', '-10 minutes')
-        order by id asc limit 20`
+          and datetime(created_at) >= datetime('now', '-24 hours')
+          and datetime(created_at) <= datetime('now', '-10 minutes')
+        order by id desc limit 200`
     ).bind(room.slug).all();
     const questions = res.results || [];
     for (const q of questions) {
+      if (!isQuestion(q.content)) continue;
       // 이미 답글이 달렸으면 패스
       const replied = await env.DB.prepare(
-        'select id from messages where room_slug = ? and reply_to_id = ? limit 1'
-      ).bind(room.slug, q.id).first();
+        `select id from messages where room_slug = ? and sender not in ('의장', '똑똑이')
+          and (reply_to_id = ? or reply_to_id in
+            (select id from messages where room_slug = ? and sender = '의장' and reply_to_id = ?)) limit 1`
+      ).bind(room.slug, q.id, room.slug, q.id).first();
       if (replied) continue;
       // 이미 의장 메시지가 달렸으면 패스 (중복 방지)
-      const chaired = await env.DB.prepare(
-        "select id from messages where room_slug = ? and reply_to_id = ? and sender = '의장' limit 1"
-      ).bind(room.slug, q.id).first();
-      if (chaired) continue;
+      const calls = await env.DB.prepare(
+        "select id, created_at from messages where room_slug = ? and reply_to_id = ? and sender = '의장' order by id"
+      ).bind(room.slug, q.id).all();
+      const previous = calls.results || [];
+      if (previous.length >= 2) continue;
+      if (previous.length && Date.now() - Date.parse(previous[0].created_at) < 30 * 60 * 1000) continue;
 
       const isDiscussion = /의논|토론/.test(q.content || '');
-      const assignee = routeQuestion(q.content);
+      const assignee = routeQuestion(q.content, room.slug);
       let content;
       if (isDiscussion) {
         // 토큰 절약: 담당자 + 정리 담당(뮤즈)만 부릅니다.
@@ -401,12 +483,27 @@ async function runChair(env) {
           `질문: ${questionSummary(q.content)}`;
       }
       // 기존 메시지 저장 로직을 그대로 재사용합니다.
-      await postMessage(env, room.slug, { sender: CHAIR_NAME, content, reply_to_id: q.id });
+      await sendAutomationOnce(env, `question:${q.id}:${previous.length + 1}`, room.slug,
+        { sender: CHAIR_NAME, content, reply_to_id: q.id });
       break; // 한 번 실행에 방마다 최대 1개
     }
   }
   await dailyReminder(env);
-  await stallNudge(env);
+  await approvalNudge(env);
+}
+
+async function approvalNudge(env) {
+  const rows = await env.DB.prepare(`select * from checklist where status = 'approved'
+    and approved_at is not null and assignee is not null and assignee != ''
+    and datetime(approved_at) <= datetime('now', '-30 minutes')
+    and (updated_at is null or datetime(updated_at) <= datetime(approved_at))`).all();
+  for (const item of rows.results || []) {
+    // Only this card's updated_at suppresses the reminder; unrelated chat does not.
+    await sendAutomationOnce(env, `approval:${item.id}:${item.approved_at}`, roomForItem(item.title, item.assignee), {
+      sender: CHAIR_NAME,
+      content: `@${canonicalAgent(item.assignee)}, #${item.id} 승인 후 30분 동안 진척이 확인되지 않았습니다. 승인 범위의 실행과 진행률을 알려주세요.`,
+    });
+  }
 }
 
 // 안 진행되는 일 재촉: 배정받고 1시간이 지나도 확인 답글이 없으면 의장이 1시간마다 불러서 확인을 재촉합니다.
@@ -671,7 +768,7 @@ async function handleApi(request, env, url) {
       if (title.length > 200) return json({ ok: false, error: 'invalid_request', message: 'title 은 200자까지 가능합니다.' }, 400);
       // 그룹을 안 보내면 오늘 날짜(M.DD)로 자동 지정합니다.
       const group = String((payload && payload.group_name) || '').trim() || todayLabel();
-      const assignee = String((payload && payload.assignee) || '').trim().slice(0, 24);
+      const assignee = canonicalAgent((payload && payload.assignee) || '').slice(0, 24);
       const source = String((payload && payload.source) || '').trim().slice(0, 40);
       const detail = String((payload && payload.detail) || '').trim().slice(0, 2000);
       const link = String((payload && payload.link) || '').trim().slice(0, 500);
@@ -708,9 +805,10 @@ async function handleApi(request, env, url) {
       const link = payload && payload.link !== undefined ? String(payload.link).trim().slice(0, 500) : (existing.link || '');
       const progress = payload && payload.progress !== undefined && payload.progress !== null && String(payload.progress).trim() !== ''
         ? Math.max(0, Math.min(100, parseInt(payload.progress, 10) || 0)) : (parseInt(existing.progress, 10) || 0);
-      const assignee = payload && payload.assignee !== undefined ? String(payload.assignee).trim().slice(0, 24) : (existing.assignee || '');
-      await env.DB.prepare('update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ?, assignee = ? where id = ?')
-        .bind(status, reason || null, detail || null, link || null, progress, assignee || null, id)
+      const assignee = canonicalAgent(payload && payload.assignee !== undefined ? payload.assignee : existing.assignee).slice(0, 24);
+      const approvalTime = status === 'approved' && existing.status !== 'approved' ? new Date().toISOString() : existing.approved_at;
+      await env.DB.prepare("update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ?, assignee = ?, approved_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') where id = ?")
+        .bind(status, reason || null, detail || null, link || null, progress, assignee || null, approvalTime || null, id)
         .run();
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
       return json({ ok: true, item: checklistRow(row) });

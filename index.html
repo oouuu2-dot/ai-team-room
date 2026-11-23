@@ -250,6 +250,110 @@
     #sendBtn{padding:11px 14px}
     .pill{display:none}
   }
+
+  /* ===== 단순화 테마 (클로드 11/23) ===== */
+  :root{--bg:#f6f6f4;--line:#ecebe7;--accent:#ff5c8a}
+  body{font-size:15px}
+  .brand small,.rdesc,#livePill,.hint,.badge{display:none!important}
+  .readbar{display:none!important}
+  .sidebar{width:212px;flex-basis:212px;padding:18px 10px}
+  .brand{padding:2px 10px 12px}
+  .room{padding:8px 12px;border-radius:10px}
+  .room .rname{font-weight:600;font-size:14px}
+  .room.active .rname{font-weight:700}
+  .rooms .label{padding:10px 12px 4px}
+  .topbar{padding:12px 22px}
+  .roomtitle h1{font-size:17px}
+  .roomtitle h1 .hash{display:none}
+  .roomtitle p{font-size:12px}
+  .markbtn{border-radius:8px;padding:6px 12px}
+  .messages{padding:18px 22px 10px;gap:2px}
+  .msg{max-width:760px;padding:8px 12px;border-radius:12px;gap:12px}
+  .msg:hover{background:#fff;box-shadow:none}
+  .avatar{flex-basis:34px;width:34px;height:34px;border-radius:50%;font-size:17px;background:#fff;border:1px solid var(--line)}
+  .who{font-size:14px}
+  .content{font-size:15px;line-height:1.7;color:#272c36}
+  /* 같은 사람이 이어서 쓴 메시지: 이름·아이콘 생략 */
+  .msg.cont{padding-top:0}
+  .msg.cont .avatar{visibility:hidden;height:0;border:0}
+  .msg.cont .meta{display:none}
+  /* 똑똑이 메시지: 눈에 띄게 */
+  .msg.boss .body{background:#fff0f4;border-radius:12px;padding:8px 12px;margin-top:-2px}
+  .msg.boss .who{color:#d6336c!important}
+  /* 의장 봇·공지: 한 줄로 접기 */
+  .msg.sys{padding:2px 12px;gap:8px;cursor:pointer;opacity:.75}
+  .msg.sys:hover{opacity:1;background:transparent}
+  .msg.sys .avatar{flex-basis:20px;width:20px;height:20px;font-size:11px;border:0;background:transparent;margin-top:3px}
+  .msg.sys .meta{display:inline-flex;margin:0 6px 0 0}
+  .msg.sys .who{font-size:12px;font-weight:600;color:#9aa0aa!important}
+  .msg.sys .time{display:none}
+  .msg.sys .body{display:flex;align-items:baseline;min-width:0}
+  .msg.sys .content{font-size:12.5px;color:#9aa0aa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .msg.sys .content *{display:inline;margin:0;padding:0;font-weight:inherit}
+  .msg.sys .content br{display:none}
+  .msg.sys .replyq,.msg.sys .replybtn{display:none}
+  .msg.sys.open{opacity:1;cursor:default}
+  .msg.sys.open .body{display:block}
+  .msg.sys.open .content{white-space:normal;color:#4b5563}
+  .msg.sys.open .content *{display:revert}
+  /* 긴 메시지 접기 */
+  .content.clamp{max-height:7.2em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 60%,transparent)}
+  .more{background:none;border:0;color:#d6336c;font-size:12.5px;font-weight:600;padding:2px 0;margin-top:2px}
+  .replyq{font-size:12px;padding:4px 10px}
+  .daysep{margin:16px 4px 10px}
+  .composer{padding:12px 18px 14px}
+  .composer .crow{max-width:760px}
+  #input{border-radius:12px}
+  #sendBtn{box-shadow:none;border-radius:10px}
+  @media (max-width:760px){.msg{padding:6px 6px}.msg.sys{padding:2px 6px}}
+
+  /* ===== 더 심플 (v2) ===== */
+  :root{--bg:#ffffff}
+  .sidebar{background:#fafaf8;border-right:1px solid #f0efeb}
+  .brand{border-bottom:0;padding-bottom:6px}
+  .rooms .label{display:none}
+  #docsLink{display:none}
+  .sidefoot{border-top:0}
+  .topbar{border-bottom:1px solid #f2f1ee;background:#fff}
+  .roomtitle p{display:none}
+  .messages{background:#fff;padding:22px 22px 10px;gap:6px}
+  .msg{max-width:680px;padding:10px 4px;border-radius:0;gap:0;border-bottom:1px solid #f4f3f0}
+  .msg:hover{background:transparent}
+  .avatar{display:none}
+  .meta{margin-bottom:2px}
+  .who{font-size:13px}
+  .time{font-size:11px;color:#b3b7bf}
+  .content{font-size:14.5px;line-height:1.65}
+  .content.clamp{max-height:3.3em;-webkit-mask-image:linear-gradient(#000 45%,transparent)}
+  .msg.cont{border-top:0;padding-top:0}
+  .msg.cont .avatar{display:none}
+  .msg.boss{border-bottom:0}
+  .msg.boss .body{background:#fff0f4;padding:10px 14px;border-radius:14px;margin-top:0}
+  .msg.boss .content{font-size:15px;color:#1d2433}
+  .msg.sys{display:none}
+  body.show-all .msg.sys{display:flex}
+  .replyq{display:none}
+  .readmark{margin:6px 0}
+  .daysep{margin:10px 4px 6px}
+  .composer{border-top:1px solid #f2f1ee}
+  .composer .crow{max-width:680px}
+  .attachbtn,select#senderSel{background:#fff}
+  #input{background:#fafaf8}
+  .toggle-all{background:none;border:0;color:#9aa0aa;font-size:12px;padding:6px 8px}
+  .toggle-all:hover{color:#d6336c}
+  .room.empty-room{display:none}
+  .room.empty-room.active{display:flex}
+
+  /* v3: AI 글은 한 줄만, 누르면 펼침 */
+  .msg{position:relative;padding:9px 4px}
+  .content.clamp{max-height:1.65em;-webkit-mask-image:none;mask-image:none;cursor:pointer;
+    display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .content.clamp *{display:inline;margin:0;padding:0}
+  .content.clamp br{display:none}
+  .more{position:absolute;right:4px;top:9px;color:#b3b7bf;font-weight:500;font-size:11.5px;margin:0}
+  .more:hover{color:#d6336c}
+  .msg.boss .body{padding:8px 14px}
+  .messages{gap:4px}
 </style>
 </head>
 <body>
@@ -277,7 +381,7 @@
       </div>
       <div class="topright">
         <span class="pill live" id="livePill">실시간 · 4초</span>
-        <button class="markbtn" id="markReadBtn">✓ 여기까지 확인 완료</button>
+        <button class="toggle-all" id="toggleAll">봇 알림 보기</button><button class="markbtn" id="markReadBtn">✓ 다 읽음</button>
       </div>
     </header>
 
@@ -348,10 +452,13 @@
     {name:'클로드', emoji:'🦊', role:'블로그 원고 · 벤치마킹'},
     {name:'Gemini', emoji:'🐰', role:'빠른 리서치 · 상위노출 분석'},
     {name:'코덱스', emoji:'🦈', role:'코드 · 자동화 · 회의실 개발'},
-    {name:'의장', emoji:'🤖', role:'회의 진행 · 역할 배정'}
+    {name:'의장', emoji:'🤖', role:'회의 진행 · 역할 배정'},
+    {name:'부이~', emoji:'🦊', role:'조사 · 가격 비교 · 정리'}
   ];
   /* 저장된 보내는 사람이 목록에 없으면 첫 번째(똑똑이)로 되돌린다 */
   function normalizeSender(v){
+    var aliases = {'브이':'부이~','부이':'부이~','v':'부이~','재미나이':'Gemini','gemini':'Gemini','codex':'코덱스','claude':'클로드'};
+    v = aliases[String(v || '').toLowerCase()] || v;
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;
   }
@@ -387,7 +494,7 @@
     s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
     s = s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
-    s = s.replace(/(^|[\s>])@([가-힣A-Za-z0-9_]{1,20})/g, '$1<span class="mention">@$2</span>');
+    s = s.replace(/(^|[\s>])@([가-힣A-Za-z0-9_~]{1,20})/g, '$1<span class="mention">@$2</span>');
     return s;
   }
   function renderMd(raw){
@@ -513,7 +620,7 @@
     state.rooms.forEach(function(r){
       var unread = (r.slug !== state.room) ? (r.unread || 0) : 0;
       var badge = unread ? '<span class="cnt">' + unread + '</span>' : '';
-      html += '<button class="room' + (r.slug === state.room ? ' active' : '') + '" data-room="' + esc(r.slug) + '">' +
+      html += '<button class="room' + (r.slug === state.room ? ' active' : '') + (r.message_count ? '' : ' empty-room') + '" data-room="' + esc(r.slug) + '" title="' + esc(r.description || '') + '">' +
         '<span class="hash">#</span>' +
         '<span style="min-width:0"><span class="rname">' + esc(r.name) + '</span>' +
         '<span class="rdesc" style="display:block">' + esc(r.description || '') + '</span></span>' +
@@ -542,8 +649,8 @@
       renderRooms();
       var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
       if (cur){
-        $('roomName').textContent = cur.slug;
-        $('roomDesc').textContent = cur.name + ' · ' + (cur.description || '');
+        $('roomName').textContent = cur.name;
+        $('roomDesc').textContent = cur.description || '';
       }
     });
   }
@@ -575,16 +682,30 @@
   function scrollBottom(smooth){
     elMessages.scrollTo({top: elMessages.scrollHeight, behavior: smooth ? 'smooth' : 'auto'});
   }
+  var lastForGroup = null;
+  var SYS_RE = /^\s*\[(규칙|자동화 규칙|토큰 절약 규칙|운영 규칙|벤치마킹 적용|새 방 안내|지휘 체계|매일 할 일 알림)/;
+  function msgKind(m){
+    if (m.sender === '의장' || SYS_RE.test(m.content || '')) return 'sys';
+    if (m.sender === '똑똑이') return 'boss';
+    return '';
+  }
   function msgHtml(m, prevDay){
     var day = kstDay(m.created_at);
     var out = '';
+    var kind = msgKind(m);
+    var p = lastForGroup;
+    var cont = kind !== 'sys' && p && p.sender === m.sender && msgKind(p) !== 'sys' && !m.reply_to &&
+      (new Date(m.created_at) - new Date(p.created_at)) < 5*60*1000 && kstDay(p.created_at) === day;
+    lastForGroup = m;
+    var cls = 'msg' + (kind ? ' ' + kind : '') + (cont ? ' cont' : '');
+    var longTxt = kind === '' && m.content && (m.content.length > 90 || (m.content.match(/\n/g) || []).length > 1);
     if (day && day !== prevDay){
       out += '<div class="daysep"><span>' + esc(day) + '</span></div>';
     }
-    out += '<div class="msg" id="m' + m.id + '" data-id="' + m.id + '">' +
+    out += '<div class="' + cls + '" id="m' + m.id + '" data-id="' + m.id + '">' +
       '<div class="avatar" style="color:' + esc(m.color || '#fff') + '">' + esc(m.emoji || String(m.sender).slice(0,1)) + '</div>' +
       '<div class="body">' +
-        '<div class="meta"><span class="who" style="color:' + esc(m.color || '#fff') + '">' + esc(m.sender) + '</span>' +
+        '<div class="meta"><span class="who" style="color:' + esc(m.color || '#fff') + '">' + esc(m.emoji || '') + ' ' + esc(m.sender) + '</span>' +
           '<span class="badge">' + esc(m.role || '참여자') + '</span>' +
           '<span class="time">' + esc(kstTime(m.created_at)) + '</span></div>';
     if (m.reply_to){
@@ -592,7 +713,8 @@
         esc(m.reply_to.content || (m.reply_to.attachment ? '📎 ' + m.reply_to.attachment.filename : '')).replace(/\n/g, ' ') + '</span></div>';
     }
     if (m.content){
-      out += '<div class="content">' + renderMd(m.content) + '</div>';
+      out += '<div class="content' + (longTxt ? ' clamp' : '') + '">' + renderMd(kind === 'sys' ? m.content.replace(/\s*\n\s*/g, ' · ') : m.content) + '</div>' +
+        (longTxt ? '<button class="more">펼치기 ▾</button>' : '');
     }
     if (m.attachment){
       var attUrl = esc(m.attachment.url + '?key=' + encodeURIComponent(state.key));
@@ -613,6 +735,7 @@
       return;
     }
     var html = '', prevDay = '';
+    lastForGroup = null;
     state.messages.forEach(function(m){
       html += msgHtml(m, prevDay);
       prevDay = kstDay(m.created_at);
@@ -647,6 +770,23 @@
       })
       .catch(function(err){ setStatus(false, '확인 표시 실패 · ' + (err.message || '다시 시도')); });
   }
+  elMessages.addEventListener('click', function(e){
+    var more = e.target.closest('.more');
+    var cl = e.target.closest('.content.clamp');
+    if (cl && !e.target.closest('a')){ more = cl.parentNode.querySelector('.more'); }
+    if (more){
+      var c = more.previousElementSibling;
+      var open = c.classList.toggle('clamp');
+      more.textContent = open ? '펼치기 ▾' : '접기 ▴';
+      return;
+    }
+    var sys = e.target.closest('.msg.sys');
+    if (sys && !sys.classList.contains('open')) sys.classList.add('open');
+  });
+  $('toggleAll').addEventListener('click', function(){
+    var on = document.body.classList.toggle('show-all');
+    this.textContent = on ? '봇 알림 숨기기' : '봇 알림 보기';
+  });
   $('markReadBtn').addEventListener('click', markRead);
   $('markReadBtn2').addEventListener('click', markRead);
   function appendMessages(list){
@@ -654,6 +794,7 @@
     var stick = nearBottom();
     var prevDay = state.messages.length ? kstDay(state.messages[state.messages.length - 1].created_at) : '';
     var html = '';
+    lastForGroup = state.messages.length ? state.messages[state.messages.length - 1] : null;
     list.forEach(function(m){
       html += msgHtml(m, prevDay);
       prevDay = kstDay(m.created_at);
@@ -985,8 +1126,8 @@
     $('progressView').classList.remove('show');
     var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
     if (cur){
-      $('roomName').textContent = cur.slug;
-      $('roomDesc').textContent = cur.name + ' · ' + (cur.description || '');
+      $('roomName').textContent = cur.name;
+      $('roomDesc').textContent = cur.description || '';
     }
   }
   function loadChecklist(){
