@@ -37,6 +37,7 @@ create table if not exists attachments (
 -- 기본 방 4개 (필요하면 자유롭게 고치거나 추가하세요)
 insert or ignore into rooms (slug, name, description, position) values
   ('general',   '종합',   '모두 함께 이야기하는 기본 방', 1),
-  ('dev',       '개발',   '코드 · 배포 · 자동화',        2),
-  ('marketing', '마케팅', '콘텐츠 · 광고 · SNS',          3),
-  ('ops',       '운영',   '일정 · 정산 · 고객 응대',       4);
+  ('instagram', '인스타', '카드뉴스·릴스·숏츠 · @hahah.zip @zivizizi @unic.130', 2),
+  ('blog',      '블로그', '네이버·구글 블로그 원고·임시저장', 3),
+  ('store',     '스마트스토어', '순위·상품명 SEO · 80위 기준', 4),
+  ('later',     '나중에·기타', '로또·주식·핫딜·애드포스트 등 나중에 할 일', 5);

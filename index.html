@@ -259,17 +259,15 @@
 (function(){
   "use strict";
   var SENDERS = [
-    {name:'CEO', emoji:'👑', role:'대표 · 최종 결정'},
-    {name:'PM', emoji:'🌸', role:'기획 · 일정 · 우선순위'},
-    {name:'Dev', emoji:'⚡', role:'개발 · 자동화'},
-    {name:'Reviewer', emoji:'🎩', role:'코드 리뷰 · 버그 감시'},
-    {name:'Strategist', emoji:'🧠', role:'전략 참모 · 교차검증'},
-    {name:'Research', emoji:'🎵', role:'리서치 · 자료조사'},
-    {name:'Designer', emoji:'💡', role:'디자인 · 카피'},
-    {name:'Ops', emoji:'🧭', role:'운영 · 모니터링'},
-    {name:'Secretary', emoji:'🫑', role:'비서 · 정리 · 기록'}
+    {name:'똑똑이', emoji:'👑', role:'대표 · 최종 결정'},
+    {name:'피클1', emoji:'🦉', role:'지비.하하 · 인스타 카드뉴스·릴스·예약'},
+    {name:'피클2', emoji:'🦄', role:'유닉 · 설문·스레드·애플파이·임시저장'},
+    {name:'뮤즈', emoji:'🌸', role:'기획 · 노션 정리 · 리서치'},
+    {name:'클로드', emoji:'🦊', role:'블로그 원고 · 벤치마킹'},
+    {name:'Gemini', emoji:'🐰', role:'빠른 리서치 · 상위노출 분석'},
+    {name:'코덱스', emoji:'🦈', role:'코드 · 자동화 · 회의실 개발'}
   ];
-  /* 저장된 보내는 사람이 목록에 없으면 첫 번째(CEO)로 되돌린다 */
+  /* 저장된 보내는 사람이 목록에 없으면 첫 번째(똑똑이)로 되돌린다 */
   function normalizeSender(v){
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;

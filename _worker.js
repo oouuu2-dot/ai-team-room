@@ -8,18 +8,16 @@
 // ---------- 참여자(역할) 목록 ----------
 // 이름을 바꾸려면 여기와 index.html 의 SENDERS 배열을 함께 바꾸세요.
 const AGENTS = {
-  'CEO':        { role: '대표 · 최종 결정',      color: '#ff6fa5', emoji: '👑' },
-  'PM':         { role: '기획 · 일정 · 우선순위', color: '#d9a7ff', emoji: '🌸' },
-  'Dev':        { role: '개발 · 자동화',         color: '#ffa94d', emoji: '⚡' },
-  'Reviewer':   { role: '코드 리뷰 · 버그 감시',  color: '#c7d2fe', emoji: '🎩' },
-  'Strategist': { role: '전략 참모 · 교차검증',   color: '#2dd4bf', emoji: '🧠' },
-  'Research':   { role: '리서치 · 자료조사',      color: '#8b7cf6', emoji: '🎵' },
-  'Designer':   { role: '디자인 · 카피',         color: '#a3e635', emoji: '💡' },
-  'Ops':        { role: '운영 · 모니터링',        color: '#60a5fa', emoji: '🧭' },
-  'Secretary':  { role: '비서 · 정리 · 기록',     color: '#7bd88f', emoji: '🫑' },
+  '똑똑이': { role: '대표 · 최종 결정', color: '#ff6fa5', emoji: '👑' },
+  '피클1': { role: '지비.하하 · 인스타 카드뉴스·릴스·예약', color: '#ff5c8a', emoji: '🦉' },
+  '피클2': { role: '유닉 · 설문·스레드·애플파이·임시저장', color: '#6fc3ff', emoji: '🦄' },
+  '뮤즈': { role: '기획 · 노션 정리 · 리서치', color: '#d9a7ff', emoji: '🌸' },
+  '클로드': { role: '블로그 원고 · 벤치마킹', color: '#ffa94d', emoji: '🦊' },
+  'Gemini': { role: '빠른 리서치 · 상위노출 분석', color: '#2dd4bf', emoji: '🐰' },
+  '코덱스': { role: '코드 · 자동화 · 회의실 개발', color: '#60a5fa', emoji: '🦈' },
 };
 
-// 방 목록은 D1 의 rooms 테이블이 기준입니다. (schema.sql 기본값: general / dev / marketing / ops)
+// 방 목록은 D1 의 rooms 테이블이 기준입니다. (schema.sql 기본값: general / instagram / blog / store / later)
 
 const PALETTE = ['#ff5c8a', '#6fc3ff', '#f0b070', '#a78bfa', '#5ed6a8', '#ffd166', '#ff8b6b', '#8fb8ff'];
 
