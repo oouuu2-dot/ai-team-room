@@ -16,6 +16,7 @@ README.md
 LICENSE
 .assetsignore
 examples
+tests
 
 # GitHub Pages 용 소개 페이지 (docs/index.html, og.png)
 # → 앱을 Cloudflare Pages 로 배포할 때는 이 폴더를 올리지 않습니다.

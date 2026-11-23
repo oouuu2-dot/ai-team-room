@@ -263,7 +263,96 @@ async function postMessage(env, slug, payload) {
     .first();
   const messages = [decorate(row)];
   await attachReplies(env, messages, slug);
+  await queueTelegram(env, row);
   return { message: messages[0] };
+}
+
+
+// Telegram credentials are Cloudflare secrets only. Never log request URLs.
+async function ensureTelegram(env) {
+  await env.DB.prepare(`create table if not exists telegram_inbox (update_id integer primary key)` ).run();
+  await env.DB.prepare(`create table if not exists telegram_outbox (
+    message_id integer primary key, text text not null, sent_at text,
+    lease_until text, attempts integer not null default 0)` ).run();
+}
+
+function telegramEligible(row) {
+  return row.room_slug === 'to-me' || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
+}
+
+function telegramSummary(roomName, row) {
+  const lines = String(row.content || '').split(/\r?\n/);
+  const text = `[${roomName}] ${String(row.sender || '').trim()}: ${lines.slice(0, 3).join('\n')}`;
+  return text.length > 1000 ? text.slice(0, 999) + '…' : text + (lines.length > 3 ? '…' : '');
+}
+
+async function queueTelegram(env, row) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID || !telegramEligible(row)) return;
+  await ensureTelegram(env);
+  const room = await getRoom(env, row.room_slug);
+  await env.DB.prepare('insert or ignore into telegram_outbox (message_id, text) values (?, ?)')
+    .bind(row.id, telegramSummary(room ? room.name : row.room_slug, row)).run();
+}
+
+async function flushTelegram(env) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
+  await ensureTelegram(env);
+  const rows = await env.DB.prepare(`select message_id, text from telegram_outbox
+    where sent_at is null and (lease_until is null or datetime(lease_until) < datetime('now'))
+    order by message_id limit 20`).all();
+  for (const row of rows.results || []) {
+    const claim = await env.DB.prepare(`update telegram_outbox set lease_until = datetime('now', '+2 minutes'), attempts = attempts + 1
+      where message_id = ? and sent_at is null and (lease_until is null or datetime(lease_until) < datetime('now'))`)
+      .bind(row.message_id).run();
+    if (!claim.meta?.changes) continue;
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: row.text }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error('telegram_send_failed');
+      await env.DB.prepare("update telegram_outbox set sent_at = datetime('now'), lease_until = null where message_id = ?")
+        .bind(row.message_id).run();
+    } catch {
+      // Keep the lease and retry on the next cron; do not expose bot URLs/tokens.
+      console.error('[telegram] delivery deferred');
+      break;
+    }
+  }
+}
+
+function telegramRoute(text) {
+  const match = /^\/(blog|threads|store|insta|general)(?:@sorabbang_team_bot)?(?:\s+|$)/i.exec(text);
+  return { room: match ? ({ insta: 'instagram' }[match[1].toLowerCase()] || match[1].toLowerCase()) : 'orders',
+    content: (match ? text.slice(match[0].length) : text).trim() };
+}
+
+async function telegramWebhook(request, env) {
+  if (request.method !== 'POST') return json({ ok: false }, 405);
+  if (!env.TELEGRAM_WEBHOOK_SECRET || !same(request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '', env.TELEGRAM_WEBHOOK_SECRET))
+    return json({ ok: false }, 403);
+  const update = await request.json();
+  const message = update.message;
+  if (!Number.isSafeInteger(update.update_id) || !message || message.from?.is_bot ||
+      !env.TELEGRAM_USER_ID || String(message.from?.id) !== String(env.TELEGRAM_USER_ID) ||
+      String(message.chat?.id) !== String(env.TELEGRAM_CHAT_ID)) return json({ ok: true });
+  const text = message.text || message.caption;
+  if (typeof text !== 'string') return json({ ok: true });
+  const routed = telegramRoute(text);
+  if (!routed.content) return json({ ok: true });
+  await ensureRooms(env);
+  await ensureTelegram(env);
+  // The message and update receipt commit together, so Telegram retries cannot duplicate a post.
+  await env.DB.batch([
+    env.DB.prepare(`insert into messages (room_slug, sender, content, created_at)
+      select ?, '똑똑이', ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      where not exists (select 1 from telegram_inbox where update_id = ?)`)
+      .bind(routed.room, routed.content.slice(0, 4000), update.update_id),
+    env.DB.prepare('insert or ignore into telegram_inbox (update_id) values (?)').bind(update.update_id),
+  ]);
+  return json({ ok: true });
 }
 
 
@@ -784,15 +873,21 @@ async function handleApi(request, env, url) {
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
-      runChair(env).catch((err) => console.error('[chair]', err && err.message ? err.message : err))
+      runChair(env).catch((err) => console.error('[chair]', err && err.message ? err.message : err)).then(() => flushTelegram(env))
     );
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    if (url.pathname === '/telegram/webhook') {
+      try { return await telegramWebhook(request, env); }
+      catch { return json({ ok: false, error: 'telegram_webhook_failed' }, 500); }
+    }
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       try {
-        return await handleApi(request, env, url);
+        const response = await handleApi(request, env, url);
+        if (request.method === 'POST') ctx?.waitUntil(flushTelegram(env));
+        return response;
       } catch (err) {
         return json(
           { ok: false, error: 'server_error', message: String(err && err.message ? err.message : err) },
