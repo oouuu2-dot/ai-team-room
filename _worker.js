@@ -324,8 +324,11 @@ async function flushTelegram(env) {
 }
 
 function telegramRoute(text) {
-  const match = /^\/(blog|threads|store|insta|general)(?:@sorabbang_team_bot)?(?:\s+|$)/i.exec(text);
-  return { room: match ? ({ insta: 'instagram' }[match[1].toLowerCase()] || match[1].toLowerCase()) : 'orders',
+  const rooms = { blog: 'blog', threads: 'threads', store: 'store', insta: 'instagram', general: 'general',
+    '블로그': 'blog', '스레드': 'threads', '스토어': 'store', '스스': 'store', '인스타': 'instagram', '종합': 'general', '지시': 'orders' };
+  const match = /^\/(blog|threads|store|insta|general|블로그|스레드|스토어|스스|인스타|종합|지시)(?:@sorabbang_team_bot)?(?:\s+|$)/i.exec(text)
+    || /^(블로그|스레드|스토어|스스|인스타|종합|지시)\s*[:：]\s*/.exec(text);
+  return { room: match ? rooms[match[1].toLowerCase()] : 'orders',
     content: (match ? text.slice(match[0].length) : text).trim() };
 }
 

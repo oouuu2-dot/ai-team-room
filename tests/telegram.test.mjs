@@ -42,6 +42,34 @@ test('all room commands route, ordinary text defaults to orders', () => {
   }
   assert.equal(f.api.telegramRoute('hello').room, 'orders'); f.db.close();
 });
+test('Korean slash and colon room aliases preserve the message body', () => {
+  const f = fixture();
+  for (const [alias, room] of [['블로그','blog'],['스레드','threads'],['스토어','store'],['스스','store'],['인스타','instagram'],['종합','general'],['지시','orders']]) {
+    for (const prefix of [`/${alias} `, `/${alias}@sorabbang_team_bot `, `${alias}:`, `${alias} : `, `${alias}：`]) {
+      const routed = f.api.telegramRoute(prefix + '내용: @코덱스\n두 번째 줄');
+      assert.equal(routed.room, room);
+      assert.equal(routed.content, '내용: @코덱스\n두 번째 줄');
+    }
+    assert.equal(f.api.telegramRoute(`/${alias}`).content, '');
+    assert.equal(f.api.telegramRoute(`${alias}:`).content, '');
+  }
+  for (const text of ['/인스타그램 확인', '/blogger hello', '블로그 글 써줘', '/인스타@other_bot 안녕', '내용 중 블로그: 그대로']) {
+    assert.equal(f.api.telegramRoute(text).room, 'orders');
+    assert.equal(f.api.telegramRoute(text).content, text);
+  }
+  f.db.close();
+});
+test('Korean routing reaches the authenticated webhook and defaults remain unchanged', async () => {
+  const f = fixture();
+  await webhook(f, '/인스타 하하집 확인', {id:100});
+  await webhook(f, '블로그: 원고 확인', {id:101});
+  await webhook(f, '아무 접두어 없는 요청', {id:102});
+  const rows = f.db.prepare('select room_slug,content from messages order by id').all();
+  assert.equal(rows[0].room_slug, 'instagram'); assert.equal(rows[0].content, '하하집 확인');
+  assert.equal(rows[1].room_slug, 'blog'); assert.equal(rows[1].content, '원고 확인');
+  assert.equal(rows[2].room_slug, 'orders');
+  f.db.close();
+});
 test('webhook authenticates group and person, deduplicates and never echoes', async () => {
   const f = fixture();
   assert.equal((await webhook(f, 'hello', { secret: 'wrong' })).status, 403);
