@@ -273,6 +273,9 @@ async function ensureChecklistTable(env) {
        created_at text not null default (datetime('now'))
      )`
   ).run();
+  // 내용(detail)·링크(link) 컬럼 추가 (이미 있으면 무시)
+  try { await env.DB.prepare(`alter table checklist add column detail text`).run(); } catch (e) {}
+  try { await env.DB.prepare(`alter table checklist add column link text`).run(); } catch (e) {}
 }
 
 function checklistRow(row) {
@@ -284,6 +287,8 @@ function checklistRow(row) {
     status: row.status,
     source: row.source || '',
     reason: row.reason || '',
+    detail: row.detail || '',
+    link: row.link || '',
     created_at: row.created_at,
   };
 }
@@ -291,7 +296,7 @@ function checklistRow(row) {
 async function listChecklist(env) {
   await ensureChecklistTable(env);
   const res = await env.DB.prepare(
-    'select id, title, group_name, assignee, status, source, reason, created_at from checklist order by group_name, id'
+    'select id, title, group_name, assignee, status, source, reason, detail, link, created_at from checklist order by group_name, id'
   ).all();
   return (res.results || []).map(checklistRow);
 }
@@ -448,7 +453,7 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 - GET /api/agents — 참여자 목록
 - GET /api/checklist — 결재·체크리스트 목록
 - POST /api/checklist — 체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)
-- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/done/approved/rejected)
+- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/done/approved/rejected) · 내용(detail)·링크(link) 수정 가능
 - GET /api/attachments/:id — 첨부 이미지/파일 조회 (인증 필요, ?key= 지원)
 - GET /api/docs?format=json — 이 안내의 JSON 버전
 - GET /api/health — 상태 확인(인증 불필요)
@@ -592,12 +597,14 @@ async function handleApi(request, env, url) {
       const group = String((payload && payload.group_name) || '').trim() || todayLabel();
       const assignee = String((payload && payload.assignee) || '').trim().slice(0, 24);
       const source = String((payload && payload.source) || '').trim().slice(0, 40);
+      const detail = String((payload && payload.detail) || '').trim().slice(0, 2000);
+      const link = String((payload && payload.link) || '').trim().slice(0, 500);
       await ensureChecklistTable(env);
       const res = await env.DB.prepare(
-        `insert into checklist (title, group_name, assignee, status, source, created_at)
-         values (?, ?, ?, 'todo', ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+        `insert into checklist (title, group_name, assignee, status, source, detail, link, created_at)
+         values (?, ?, ?, 'todo', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
       )
-        .bind(title, group, assignee || null, source || null)
+        .bind(title, group, assignee || null, source || null, detail || null, link || null)
         .run();
       const id = res.meta && res.meta.last_row_id;
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
@@ -612,16 +619,19 @@ async function handleApi(request, env, url) {
       } catch (e) {
         return json({ ok: false, error: 'invalid_json', message: 'JSON 본문이 필요합니다.' }, 400);
       }
-      const status = String((payload && payload.status) || '').trim();
+      await ensureChecklistTable(env);
+      const existing = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
+      if (!existing) return json({ ok: false, error: 'not_found', message: '항목이 없습니다.' }, 404);
+      const status = payload && payload.status !== undefined && payload.status !== null && String(payload.status).trim() !== ''
+        ? String(payload.status).trim() : existing.status;
       if (!CHECKLIST_STATUSES.includes(status)) {
         return json({ ok: false, error: 'invalid_request', message: 'status 는 todo/done/approved/rejected 중 하나여야 합니다.' }, 400);
       }
-      const reason = String((payload && payload.reason) || '').trim().slice(0, 500);
-      await ensureChecklistTable(env);
-      const existing = await env.DB.prepare('select id from checklist where id = ?').bind(id).first();
-      if (!existing) return json({ ok: false, error: 'not_found', message: '항목이 없습니다.' }, 404);
-      await env.DB.prepare('update checklist set status = ?, reason = ? where id = ?')
-        .bind(status, reason || null, id)
+      const reason = payload && payload.reason !== undefined ? String(payload.reason).trim().slice(0, 500) : (existing.reason || '');
+      const detail = payload && payload.detail !== undefined ? String(payload.detail).trim().slice(0, 2000) : (existing.detail || '');
+      const link = payload && payload.link !== undefined ? String(payload.link).trim().slice(0, 500) : (existing.link || '');
+      await env.DB.prepare('update checklist set status = ?, reason = ?, detail = ?, link = ? where id = ?')
+        .bind(status, reason || null, detail || null, link || null, id)
         .run();
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
       return json({ ok: true, item: checklistRow(row) });
