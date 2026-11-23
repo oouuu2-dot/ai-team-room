@@ -24,7 +24,7 @@ const PALETTE = ['#ff5c8a', '#6fc3ff', '#f0b070', '#a78bfa', '#5ed6a8', '#ffd166
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Room-Key',
   'Access-Control-Max-Age': '86400',
 };
@@ -230,6 +230,53 @@ async function postMessage(env, slug, payload) {
 }
 
 
+// ---------- 결재·체크리스트 ----------
+// group_name: '매일' = 노션에서 가져온 항목, 'M.DD'(예: 11.23) = 회의실에서 추가한 오늘 날짜 항목.
+// D1에는 첫 사용 시 CREATE TABLE IF NOT EXISTS 로 자동 생성합니다.
+const CHECKLIST_STATUSES = ['todo', 'done', 'approved', 'rejected'];
+
+// 한국 날짜 기준 오늘 날짜를 'M.DD' 형식으로 돌려줍니다 (예: 11.23).
+function todayLabel() {
+  const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  return (d.getUTCMonth() + 1) + '.' + String(d.getUTCDate()).padStart(2, '0');
+}
+
+async function ensureChecklistTable(env) {
+  await env.DB.prepare(
+    `create table if not exists checklist (
+       id integer primary key autoincrement,
+       title text not null,
+       group_name text,
+       assignee text,
+       status text not null default 'todo',
+       source text,
+       reason text,
+       created_at text not null default (datetime('now'))
+     )`
+  ).run();
+}
+
+function checklistRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    group_name: row.group_name || '',
+    assignee: row.assignee || '',
+    status: row.status,
+    source: row.source || '',
+    reason: row.reason || '',
+    created_at: row.created_at,
+  };
+}
+
+async function listChecklist(env) {
+  await ensureChecklistTable(env);
+  const res = await env.DB.prepare(
+    'select id, title, group_name, assignee, status, source, reason, created_at from checklist order by group_name, id'
+  ).all();
+  return (res.results || []).map(checklistRow);
+}
+
 // ---------- 의장 봇 (10분마다 방을 확인해 사회를 봅니다) ----------
 // Cloudflare Cron Trigger가 scheduled(event, env, ctx)를 10분마다 부릅니다.
 // 규칙: 최근 10분 안에 올라온 똑똑이님 메시지 중 답글이 아직 없는 것만 처리합니다.
@@ -347,6 +394,9 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 
 ## 그 밖의 엔드포인트
 - GET /api/agents — 참여자 목록
+- GET /api/checklist — 결재·체크리스트 목록
+- POST /api/checklist — 체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)
+- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/done/approved/rejected)
 - GET /api/attachments/:id — 첨부 이미지/파일 조회 (인증 필요, ?key= 지원)
 - GET /api/docs?format=json — 이 안내의 JSON 버전
 - GET /api/health — 상태 확인(인증 불필요)
@@ -416,6 +466,19 @@ async function handleApi(request, env, url) {
             body: { sender: 'Dev', content: '안녕하세요', reply_to_id: 12 },
             note: '메시지 전송',
           },
+          { method: 'GET', path: '/api/checklist', note: '결재·체크리스트 목록' },
+          {
+            method: 'POST',
+            path: '/api/checklist',
+            body: { title: '할 일', group_name: '매일', assignee: '피클1', source: 'notion' },
+            note: '체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)',
+          },
+          {
+            method: 'PATCH',
+            path: '/api/checklist/:id',
+            body: { status: 'approved', reason: '' },
+            note: '체크리스트 상태 변경 (todo/done/approved/rejected)',
+          },
           { method: 'GET', path: '/api/agents', note: '참여자 목록' },
           { method: 'GET', path: '/api/health', note: '상태 확인(인증 불필요)' },
         ],
@@ -456,6 +519,62 @@ async function handleApi(request, env, url) {
         ...CORS,
       },
     });
+  }
+
+  // ---------- 결재·체크리스트 ----------
+  if (parts[1] === 'checklist') {
+    if (method === 'GET' && parts.length === 2) {
+      return json({ ok: true, items: await listChecklist(env) });
+    }
+    if (method === 'POST' && parts.length === 2) {
+      let payload;
+      try {
+        payload = await request.json();
+      } catch (e) {
+        return json({ ok: false, error: 'invalid_json', message: 'JSON 본문이 필요합니다.' }, 400);
+      }
+      const title = String((payload && payload.title) || '').trim();
+      if (!title) return json({ ok: false, error: 'invalid_request', message: 'title 이 필요합니다.' }, 400);
+      if (title.length > 200) return json({ ok: false, error: 'invalid_request', message: 'title 은 200자까지 가능합니다.' }, 400);
+      // 그룹을 안 보내면 오늘 날짜(M.DD)로 자동 지정합니다.
+      const group = String((payload && payload.group_name) || '').trim() || todayLabel();
+      const assignee = String((payload && payload.assignee) || '').trim().slice(0, 24);
+      const source = String((payload && payload.source) || '').trim().slice(0, 40);
+      await ensureChecklistTable(env);
+      const res = await env.DB.prepare(
+        `insert into checklist (title, group_name, assignee, status, source, created_at)
+         values (?, ?, ?, 'todo', ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+      )
+        .bind(title, group, assignee || null, source || null)
+        .run();
+      const id = res.meta && res.meta.last_row_id;
+      const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
+      return json({ ok: true, item: checklistRow(row) }, 201);
+    }
+    if (method === 'PATCH' && parts.length === 3) {
+      const id = parseInt(parts[2], 10);
+      if (!Number.isFinite(id) || id <= 0) return json({ ok: false, error: 'invalid_id' }, 400);
+      let payload;
+      try {
+        payload = await request.json();
+      } catch (e) {
+        return json({ ok: false, error: 'invalid_json', message: 'JSON 본문이 필요합니다.' }, 400);
+      }
+      const status = String((payload && payload.status) || '').trim();
+      if (!CHECKLIST_STATUSES.includes(status)) {
+        return json({ ok: false, error: 'invalid_request', message: 'status 는 todo/done/approved/rejected 중 하나여야 합니다.' }, 400);
+      }
+      const reason = String((payload && payload.reason) || '').trim().slice(0, 500);
+      await ensureChecklistTable(env);
+      const existing = await env.DB.prepare('select id from checklist where id = ?').bind(id).first();
+      if (!existing) return json({ ok: false, error: 'not_found', message: '항목이 없습니다.' }, 404);
+      await env.DB.prepare('update checklist set status = ?, reason = ? where id = ?')
+        .bind(status, reason || null, id)
+        .run();
+      const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
+      return json({ ok: true, item: checklistRow(row) });
+    }
+    return json({ ok: false, error: 'method_not_allowed' }, 405);
   }
 
   if (parts[1] === 'rooms' && parts.length === 2 && method === 'GET') {

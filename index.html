@@ -163,6 +163,33 @@
   #sendBtn:disabled{opacity:.5;cursor:default;box-shadow:none}
   .hint{font-size:10.5px;color:#9aa0aa;margin:8px 2px 0;display:flex;gap:8px;flex-wrap:wrap}
 
+  /* ---------- 결재 ---------- */
+  .approval{flex:1;overflow-y:auto;padding:24px 22px;display:none}
+  .approval.show{display:block}
+  .appr-wrap{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+  .appr-sec h2{margin:0 0 4px;font-size:16px}
+  .appr-desc{margin:0 0 12px;font-size:12.5px;color:var(--muted)}
+  .appr-count{font-size:12px;color:#c22e5f;background:var(--accent-dim);border-radius:12px;padding:1px 8px}
+  .appr-item{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:8px;box-shadow:var(--shadow)}
+  .appr-item .t{font-weight:700;font-size:14px}
+  .appr-item .meta2{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .appr-item .btns{display:flex;gap:8px;margin-top:10px}
+  .btn-approve{background:var(--ok);border:0;border-radius:10px;color:#fff;font-weight:700;padding:7px 14px;font-size:12.5px}
+  .btn-reject{background:#fff;border:1px solid #fecdd3;color:#e11d48;border-radius:10px;font-weight:700;padding:7px 14px;font-size:12.5px}
+  .grp{margin-bottom:16px}
+  .grp h3{margin:0 0 8px;font-size:13.5px;color:#374151}
+  .grp h3 .tag{color:#c22e5f;font-weight:700}
+  .chk{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:9px 12px;margin-bottom:6px;cursor:pointer}
+  .chk input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
+  .chk .t{flex:1;font-size:14px}
+  .chk.done .t{text-decoration:line-through;color:var(--muted)}
+  .chk .who2{font-size:11px;color:var(--muted)}
+  .add-row{display:flex;gap:8px;margin-top:4px}
+  .add-row input{flex:1;background:#faf9f7;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;font-size:14px;outline:none}
+  .add-row input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #ff5c8a1f;background:#fff}
+  .add-row button{background:var(--accent);border:0;border-radius:12px;color:#fff;font-weight:700;padding:11px 18px;font-size:13.5px}
+  .add-row button:hover{background:#f74a7d}
+
   /* ---------- gate ---------- */
   .gate{
     position:fixed;inset:0;background:radial-gradient(1000px 500px at 50% -10%,#ffe4ec 0%,#f7f6f3 62%);
@@ -191,6 +218,7 @@
     body.nav-open:after{content:"";position:fixed;inset:0;background:rgba(29,36,51,.35);z-index:35}
     .menu-btn{display:block}
     .messages{padding:14px 12px 8px}
+    .approval{padding:14px 12px}
     .msg{padding:8px 8px}
     .replybtn{opacity:1;position:static;margin-top:4px;background:transparent;border:0;color:#9aa0aa;padding:0;font-size:11px;box-shadow:none}
     .composer{padding:10px 12px 14px}
@@ -230,7 +258,26 @@
 
     <div class="messages" id="messages"></div>
 
-    <div class="composer">
+    <div class="approval" id="approvalView">
+      <div class="appr-wrap">
+        <section class="appr-sec">
+          <h2>결재 대기 <span class="appr-count" id="pendingCount">0건</span></h2>
+          <p class="appr-desc">완료된 일이에요. 승인하거나 사유를 적어 반려하세요.</p>
+          <div id="pendingList"></div>
+        </section>
+        <section class="appr-sec">
+          <h2>할 일·지시 체크리스트</h2>
+          <p class="appr-desc">[매일]은 노션에서 가져온 일, [날짜]는 회의실에서 추가한 오늘의 일이에요.</p>
+          <div id="checklistGroups"></div>
+          <div class="add-row">
+            <input id="newItemTitle" type="text" placeholder="새 할 일 / 지시 입력">
+            <button id="addItemBtn">추가</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="composer" id="composer">
       <div class="replybar" id="replyBar" hidden>
         <span>답글 →</span><b id="replyWho"></b><span id="replySnippet" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
         <button class="x" id="replyCancel" aria-label="답글 취소">×</button>
@@ -289,7 +336,9 @@
     lastId: 0,
     replyTo: null,
     timer: null,
-    loading: false
+    loading: false,
+    view: 'room',
+    items: []
   };
 
   var $ = function(id){ return document.getElementById(id); };
@@ -444,12 +493,22 @@
         '<span class="rdesc" style="display:block">' + esc(r.description || '') + '</span></span>' +
         badge + '</button>';
     });
+    var pendingN = (state.items || []).filter(function(i){ return i.status === 'done'; }).length;
+    html += '<div class="label" style="margin-top:10px">결재</div>' +
+      '<button class="room' + (state.view === 'approval' ? ' active' : '') + '" id="approvalBtn">' +
+      '<span class="hash">✓</span>' +
+      '<span style="min-width:0"><span class="rname">결재</span>' +
+      '<span class="rdesc" style="display:block">할 일·지시 체크 · 승인</span></span>' +
+      '<span class="cnt" id="approvalBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
+      '</button>';
     elRoomList.innerHTML = html;
     Array.prototype.forEach.call(elRoomList.querySelectorAll('.room'), function(btn){
       btn.addEventListener('click', function(){
         switchRoom(btn.getAttribute('data-room'));
       });
     });
+    var ab = elRoomList.querySelector('#approvalBtn');
+    if (ab) ab.addEventListener('click', showApproval);
   }
   function loadRooms(){
     return api('/api/rooms').then(function(d){
@@ -464,6 +523,8 @@
   }
   function switchRoom(slug){
     if (!slug) return;
+    state.view = 'room';
+    showRoomView();
     state.room = slug;
     state.lastId = 0;
     state.messages = [];
@@ -724,9 +785,147 @@
     localStorage.setItem('ai_team_room_sender', state.sender);
   });
 
+  /* ---------- 결재 ---------- */
+  var elApproval = $('approvalView'), elComposer = $('composer');
+  function todayLabel(){
+    var d = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    return (d.getUTCMonth() + 1) + '.' + ('0' + d.getUTCDate()).slice(-2);
+  }
+  function groupLabel(g){
+    return '[' + (g || '오늘') + ']';
+  }
+  function showApproval(){
+    state.view = 'approval';
+    document.body.classList.remove('nav-open');
+    elMessages.style.display = 'none';
+    elComposer.style.display = 'none';
+    elApproval.classList.add('show');
+    $('roomName').textContent = '결재';
+    $('roomDesc').textContent = '완료된 일 승인 · 할 일·지시 체크';
+    renderRooms();
+    loadChecklist();
+  }
+  function showRoomView(){
+    state.view = 'room';
+    elMessages.style.display = '';
+    elComposer.style.display = '';
+    elApproval.classList.remove('show');
+    var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
+    if (cur){
+      $('roomName').textContent = cur.slug;
+      $('roomDesc').textContent = cur.name + ' · ' + (cur.description || '');
+    }
+  }
+  function loadChecklist(){
+    return api('/api/checklist').then(function(d){
+      state.items = d.items || [];
+      renderApproval();
+    }).catch(function(err){
+      if (err.status === 401){
+        if (state.timer){ clearInterval(state.timer); state.timer = null; }
+        localStorage.removeItem('ai_team_room_key'); state.key = '';
+        openGate('세션이 만료되었습니다. 비밀번호를 다시 입력하세요.');
+        return;
+      }
+      setStatus(false, '결재 목록을 불러오지 못했어요');
+    });
+  }
+  function patchItem(id, body){
+    return api('/api/checklist/' + id, {method:'PATCH', body: JSON.stringify(body)})
+      .then(function(){ return loadChecklist(); });
+  }
+  function renderApproval(){
+    var items = state.items || [];
+    var pending = items.filter(function(i){ return i.status === 'done'; });
+    $('pendingCount').textContent = pending.length + '건';
+    var badge = $('approvalBadge');
+    if (badge){
+      badge.style.display = pending.length ? '' : 'none';
+      badge.textContent = pending.length;
+    }
+    var ph = '';
+    if (!pending.length){
+      ph = '<div class="empty" style="margin:12px auto">결재 대기 중인 일이 없어요.</div>';
+    } else {
+      pending.forEach(function(it){
+        ph += '<div class="appr-item"><div class="t">' + esc(it.title) + '</div>' +
+          '<div class="meta2">' + esc(groupLabel(it.group_name)) +
+          (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') +
+          (it.source ? ' · ' + esc(it.source) : '') + '</div>' +
+          '<div class="btns">' +
+          '<button class="btn-approve" data-approve="' + it.id + '">승인</button>' +
+          '<button class="btn-reject" data-reject="' + it.id + '">반려</button>' +
+          '</div></div>';
+      });
+    }
+    $('pendingList').innerHTML = ph;
+
+    var groups = [], byGroup = {};
+    items.forEach(function(it){
+      var g = it.group_name || '오늘';
+      if (!byGroup[g]){ byGroup[g] = []; groups.push(g); }
+      byGroup[g].push(it);
+    });
+    var gh = '';
+    if (!items.length){
+      gh = '<div class="empty" style="margin:12px auto">아직 항목이 없어요. 아래에서 추가하세요.</div>';
+    } else {
+      groups.forEach(function(g){
+        gh += '<div class="grp"><h3><span class="tag">' + esc(groupLabel(g)) + '</span></h3>';
+        byGroup[g].forEach(function(it){
+          var done = it.status === 'done';
+          var decided = it.status === 'approved' || it.status === 'rejected';
+          gh += '<label class="chk' + (done ? ' done' : '') + '">' +
+            '<input type="checkbox" data-check="' + it.id + '"' + (done ? ' checked' : '') + (decided ? ' disabled' : '') + '>' +
+            '<span class="t">' + esc(it.title) + '</span>' +
+            (it.assignee ? '<span class="who2">' + esc(it.assignee) + '</span>' : '') +
+            (decided ? '<span class="who2">' + (it.status === 'approved' ? '승인됨' : '반려됨') + '</span>' : '') +
+            '</label>';
+        });
+        gh += '</div>';
+      });
+    }
+    $('checklistGroups').innerHTML = gh;
+  }
+  $('pendingList').addEventListener('click', function(e){
+    var ap = e.target.closest('[data-approve]');
+    if (ap){
+      patchItem(parseInt(ap.getAttribute('data-approve'), 10), {status:'approved'});
+      return;
+    }
+    var rj = e.target.closest('[data-reject]');
+    if (rj){
+      var reason = prompt('반려 사유를 입력하세요');
+      if (reason === null) return;
+      if (!reason.trim()){ alert('반려 사유를 입력하세요.'); return; }
+      patchItem(parseInt(rj.getAttribute('data-reject'), 10), {status:'rejected', reason: reason.trim()});
+    }
+  });
+  $('checklistGroups').addEventListener('change', function(e){
+    var cb = e.target.closest('[data-check]');
+    if (!cb) return;
+    patchItem(parseInt(cb.getAttribute('data-check'), 10), {status: cb.checked ? 'done' : 'todo'});
+  });
+  function addItem(){
+    var title = $('newItemTitle').value.trim();
+    if (!title){ $('newItemTitle').focus(); return; }
+    // 그룹은 서버에서 오늘 날짜(M.DD)로 자동 지정합니다.
+    api('/api/checklist', {method:'POST', body: JSON.stringify({title: title})})
+      .then(function(){
+        $('newItemTitle').value = '';
+        return loadChecklist();
+      })
+      .catch(function(err){ setStatus(false, '추가 실패 · ' + (err.message || '다시 시도')); });
+  }
+  $('addItemBtn').addEventListener('click', addItem);
+  $('newItemTitle').addEventListener('keydown', function(e){
+    if (e.key === 'Enter'){ e.preventDefault(); addItem(); }
+  });
+
   /* ---------- boot ---------- */
   function boot(){
     elGate.hidden = true;
+    $('newItemTitle').placeholder = '새 할 일 / 지시 입력 ([' + todayLabel() + '] 그룹으로 자동 추가)';
     renderSenders();
     loadRooms().catch(function(){ setStatus(false, '연결 끊김'); });
     loadMessages(true);
@@ -735,11 +934,18 @@
     state.timer = setInterval(function(){
       if (document.hidden) return;
       tick++;
-      loadMessages(false);
-      if (tick % 5 === 0) loadRooms().catch(function(){});
+      if (state.view === 'approval'){
+        if (tick % 5 === 0) loadChecklist().catch(function(){});
+      } else {
+        loadMessages(false);
+        if (tick % 5 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); }
+      }
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
-      if (!document.hidden) loadMessages(false);
+      if (!document.hidden){
+        if (state.view === 'approval') loadChecklist();
+        else loadMessages(false);
+      }
     });
   }
 
