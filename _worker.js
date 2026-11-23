@@ -299,7 +299,7 @@ async function listChecklist(env) {
 //       방마다 최대 1개, 같은 질문에는 이미 남긴 의장 메시지가 있으면 다시 안 남깁니다.
 //       의장 자신의 메시지에는 절대 반응하지 않습니다 (똑똑이님 메시지만 봅니다).
 const CHAIR_NAME = '의장';
-const DISCUSSION_NAMES = ['피클1', '피클2', '클로드', 'Gemini', '코덱스'];
+// 토큰 절약: 의논도 최대 2명까지만 부릅니다 (담당자 + 뮤즈 정리). 5명 전원 호출은 토큰만 먹어요.
 
 // 키워드로 담당 AI를 정합니다.
 function routeQuestion(content) {
@@ -340,17 +340,17 @@ async function runChair(env) {
       if (chaired) continue;
 
       const isDiscussion = /의논|토론/.test(q.content || '');
+      const assignee = routeQuestion(q.content);
       let content;
       if (isDiscussion) {
-        const order = DISCUSSION_NAMES.map((n) => '@' + n).join(' ');
+        // 토큰 절약: 담당자 + 정리 담당(뮤즈)만 부릅니다.
+        const order = assignee === '뮤즈' ? '@뮤즈' : `@${assignee} @뮤즈`;
         content =
-          `${order} — 똑똑이님이 의논을 요청했어요. 아래 질문에 순서대로 의견을 달아주세요.\n` +
-          `질문: ${questionSummary(q.content)}\n` +
-          `각자 자기 역할 입장에서 짧게 의견 남기고, 마지막에 한 명이 정리해주세요.`;
+          `${order} — 똑똑이님이 의논을 요청했어요. 각자 자기 역할 입장에서 2줄 이내로 짧게 의견 남기고, 뮤즈가 정리해주세요.\n` +
+          `질문: ${questionSummary(q.content)}`;
       } else {
-        const assignee = routeQuestion(q.content);
         content =
-          `@${assignee}, 똑똑이님 질문에 답해주세요.\n` +
+          `@${assignee}, 똑똑이님 질문에 답해주세요. 답은 요약으로, 5줄 이내로 짧게.\n` +
           `질문: ${questionSummary(q.content)}`;
       }
       // 기존 메시지 저장 로직을 그대로 재사용합니다.
