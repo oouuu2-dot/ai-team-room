@@ -110,3 +110,23 @@ test('Telegram questions are picked up by the existing chair rules', async () =>
   assert.ok(f.db.prepare("select id from messages where sender = '의장' and reply_to_id = 1").get());
   f.db.close();
 });
+
+test('Pickle room commands, ordinary discussion notifications, and no inbound echo', async () => {
+  const f = fixture();
+  f.db.exec("delete from rooms where slug='pickles'");
+  for (const prefix of ['/pickles ', '/피클 ', '/피클토론 ', '피클:', '피클토론:']) {
+    assert.equal(f.api.telegramRoute(prefix+'회의').room,'pickles');
+    assert.equal(f.api.telegramRoute(prefix+'회의').content,'회의');
+  }
+  await webhook(f,'/피클토론 의견 주세요',{id:200});
+  assert.equal(f.db.prepare("select count(*) n from rooms where slug='pickles'").get().n,1);
+  assert.equal(f.db.prepare('select room_slug from messages').get().room_slug,'pickles');
+  assert.equal(f.db.prepare('select count(*) n from telegram_outbox').get().n,0);
+  await f.api.postMessage(f.env,'pickles',{sender:'피클1',content:'첫 의견입니다'});
+  await f.api.postMessage(f.env,'pickles',{sender:'피클2',content:'두 번째 의견입니다'});
+  await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
+  assert.equal(f.sent.length,2);
+  assert.match(f.sent[0].text,/피클 토론방.*피클1/);
+  assert.match(f.sent[1].text,/피클 토론방.*피클2/);
+  f.db.close();
+});

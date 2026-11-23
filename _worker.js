@@ -136,6 +136,9 @@ async function ensureRooms(env) {
     await env.DB.prepare(
       `insert or ignore into rooms (slug, name, description, position) values ('threads', '스레드', '스레드 분석·벤치마킹·발행 준비', 8)`
     ).run();
+    await env.DB.prepare(
+      `insert or ignore into rooms (slug, name, description, position) values ('pickles', '피클 토론방', '피클1·피클2가 토론하고 결과를 내는 방', 9)`
+    ).run();
   } catch (e) {
     // rooms 테이블이 아직 없으면 아래 SELECT가 기존처럼 에러를 냅니다.
   }
@@ -277,7 +280,7 @@ async function ensureTelegram(env) {
 }
 
 function telegramEligible(row) {
-  return row.room_slug === 'to-me' || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
+  return row.room_slug === 'to-me' || row.room_slug === 'pickles' || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
 }
 
 function telegramSummary(roomName, row) {
@@ -324,10 +327,11 @@ async function flushTelegram(env) {
 }
 
 function telegramRoute(text) {
-  const rooms = { blog: 'blog', threads: 'threads', store: 'store', insta: 'instagram', general: 'general',
+  const rooms = { blog: 'blog', threads: 'threads', store: 'store', insta: 'instagram', general: 'general', pickles: 'pickles',
+    '피클': 'pickles', '피클토론': 'pickles',
     '블로그': 'blog', '스레드': 'threads', '스토어': 'store', '스스': 'store', '인스타': 'instagram', '종합': 'general', '지시': 'orders' };
-  const match = /^\/(blog|threads|store|insta|general|블로그|스레드|스토어|스스|인스타|종합|지시)(?:@sorabbang_team_bot)?(?:\s+|$)/i.exec(text)
-    || /^(블로그|스레드|스토어|스스|인스타|종합|지시)\s*[:：]\s*/.exec(text);
+  const match = /^\/(blog|threads|store|insta|general|pickles|블로그|스레드|스토어|스스|인스타|종합|지시|피클토론|피클)(?:@sorabbang_team_bot)?(?:\s+|$)/i.exec(text)
+    || /^(블로그|스레드|스토어|스스|인스타|종합|지시|피클토론|피클)\s*[:：]\s*/.exec(text);
   return { room: match ? rooms[match[1].toLowerCase()] : 'orders',
     content: (match ? text.slice(match[0].length) : text).trim() };
 }
