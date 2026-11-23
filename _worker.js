@@ -143,15 +143,33 @@ async function ensureRooms(env) {
 
 async function roomList(env) {
   await ensureRooms(env);
+  await ensureReadMarksTable(env);
   const res = await env.DB.prepare(
     `select r.slug, r.name, r.description, r.position,
             (select count(*) from messages m where m.room_slug = r.slug) as message_count,
             (select max(id) from messages m where m.room_slug = r.slug) as last_id,
-            (select created_at from messages m where m.room_slug = r.slug order by id desc limit 1) as last_message_at
+            (select created_at from messages m where m.room_slug = r.slug order by id desc limit 1) as last_message_at,
+            (select count(*) from messages m where m.room_slug = r.slug and m.sender != '똑똑이' and m.id > coalesce((select last_read_id from read_marks rm where rm.room_slug = r.slug), 0)) as unread
        from rooms r
       order by r.position, r.slug`
   ).all();
   return res.results || [];
+}
+
+async function ensureReadMarksTable(env) {
+  await env.DB.prepare(
+    `create table if not exists read_marks (
+       room_slug text primary key,
+       last_read_id integer not null default 0,
+       updated_at text not null default (datetime('now'))
+     )`
+  ).run();
+}
+
+async function getReadMark(env, slug) {
+  await ensureReadMarksTable(env);
+  const row = await env.DB.prepare('select last_read_id from read_marks where room_slug = ?').bind(slug).first();
+  return row ? (parseInt(row.last_read_id, 10) || 0) : 0;
 }
 
 async function getRoom(env, slug) {
@@ -252,7 +270,7 @@ async function postMessage(env, slug, payload) {
 // ---------- 결재·체크리스트 ----------
 // group_name: '매일' = 노션에서 가져온 항목, 'M.DD'(예: 11.23) = 회의실에서 추가한 오늘 날짜 항목.
 // D1에는 첫 사용 시 CREATE TABLE IF NOT EXISTS 로 자동 생성합니다.
-const CHECKLIST_STATUSES = ['todo', 'done', 'approved', 'rejected'];
+const CHECKLIST_STATUSES = ['todo', 'waiting', 'done', 'approved', 'rejected'];
 
 // 한국 날짜 기준 오늘 날짜를 'M.DD' 형식으로 돌려줍니다 (예: 11.23).
 function todayLabel() {
@@ -460,7 +478,7 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 - GET /api/agents — 참여자 목록
 - GET /api/checklist — 결재·체크리스트 목록
 - POST /api/checklist — 체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)
-- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/done/approved/rejected) · 내용(detail)·링크(link) 수정 가능
+- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 내용(detail)·링크(link) 수정 가능
 - GET /api/attachments/:id — 첨부 이미지/파일 조회 (인증 필요, ?key= 지원)
 - GET /api/docs?format=json — 이 안내의 JSON 버전
 - GET /api/health — 상태 확인(인증 불필요)
@@ -530,6 +548,13 @@ async function handleApi(request, env, url) {
             body: { sender: 'Dev', content: '안녕하세요', reply_to_id: 12 },
             note: '메시지 전송',
           },
+          { method: 'GET', path: '/api/rooms/:slug/read-mark', note: '똑똑이 확인완료 위치 조회' },
+          {
+            method: 'POST',
+            path: '/api/rooms/:slug/read-mark',
+            body: { last_read_id: 123 },
+            note: '똑똑이 확인완료 위치 저장 (생략 시 최신 메시지까지)',
+          },
           { method: 'GET', path: '/api/checklist', note: '결재·체크리스트 목록' },
           {
             method: 'POST',
@@ -541,7 +566,7 @@ async function handleApi(request, env, url) {
             method: 'PATCH',
             path: '/api/checklist/:id',
             body: { status: 'approved', reason: '' },
-            note: '체크리스트 상태 변경 (todo/done/approved/rejected)',
+            note: '체크리스트 상태 변경 (todo/waiting/done/approved/rejected)',
           },
           { method: 'GET', path: '/api/agents', note: '참여자 목록' },
           { method: 'GET', path: '/api/health', note: '상태 확인(인증 불필요)' },
@@ -674,6 +699,35 @@ async function handleApi(request, env, url) {
       const out = await postMessage(env, slug, payload || {});
       if (out.error) return json({ ok: false, error: 'invalid_request', message: out.error }, out.status || 400);
       return json({ ok: true, room, message: out.message }, 201);
+    }
+
+    return json({ ok: false, error: 'method_not_allowed' }, 405);
+  }
+
+  // ---------- 똑똑이 확인완료 표시 (방마다 읽은 위치 저장) ----------
+  if (parts[1] === 'rooms' && parts.length === 4 && parts[3] === 'read-mark') {
+    const slug = decodeURIComponent(parts[2]);
+    const room = await getRoom(env, slug);
+    if (!room) return json({ ok: false, error: 'room_not_found', message: `방 '${slug}' 이 없습니다.` }, 404);
+
+    if (method === 'GET') {
+      return json({ ok: true, room: slug, last_read_id: await getReadMark(env, slug) });
+    }
+
+    if (method === 'POST') {
+      let payload;
+      try { payload = await request.json(); } catch (e) { payload = {}; }
+      let lastId = parseInt(payload && payload.last_read_id, 10);
+      if (!Number.isFinite(lastId) || lastId < 0) {
+        const row = await env.DB.prepare('select max(id) as m from messages where room_slug = ?').bind(slug).first();
+        lastId = (row && row.m) || 0;
+      }
+      await ensureReadMarksTable(env);
+      await env.DB.prepare(
+        `insert into read_marks (room_slug, last_read_id, updated_at) values (?, ?, datetime('now'))
+         on conflict(room_slug) do update set last_read_id = excluded.last_read_id, updated_at = datetime('now')`
+      ).bind(slug, lastId).run();
+      return json({ ok: true, room: slug, last_read_id: lastId });
     }
 
     return json({ ok: false, error: 'method_not_allowed' }, 405);

@@ -69,6 +69,13 @@
   .roomtitle h1 .hash{color:var(--muted);font-weight:500}
   .roomtitle p{margin:2px 0 0;font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .topright{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .readmark{display:flex;align-items:center;gap:10px;margin:14px 0;color:#c22e5f;font-size:12.5px;font-weight:700}
+  .readmark::before,.readmark::after{content:'';flex:1;height:1px;background:#f3c6d4}
+  .readmark .ck{background:#ffe4ec;border:1px solid #f3c6d4;border-radius:99px;padding:2px 10px;white-space:nowrap}
+  .markbtn{background:#fff;border:1px solid var(--line);border-radius:99px;color:var(--muted);font-weight:700;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap}
+  .markbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn-mini{background:var(--accent);border:0;border-radius:8px;color:#fff;font-weight:700;padding:6px 12px;font-size:12px;cursor:pointer}
+  .btn-mini.ghost{background:#fff;border:1px solid var(--line);color:var(--text)}
   .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:4px 10px;white-space:nowrap;background:#fff}
   .pill.live{color:#15803d;border-color:#bbf7d0;background:#f0fdf4}
 
@@ -266,6 +273,7 @@
       </div>
       <div class="topright">
         <span class="pill live" id="livePill">실시간 · 4초</span>
+        <button class="markbtn" id="markReadBtn">✓ 여기까지 확인 완료</button>
       </div>
     </header>
 
@@ -294,7 +302,7 @@
       <div class="appr-wrap">
         <section class="appr-sec">
           <h2>진행 상황 <span class="appr-count" id="progressCount">0건 진행 중</span></h2>
-          <p class="appr-desc">스레드·릴스·카드뉴스가 어디까지 진행됐는지 한눈에 봐요. 체크리스트에서 자동으로 모아요.</p>
+          <p class="appr-desc">지시방 지시와 체크리스트를 스레드·릴스·카드뉴스·기타로 모아서 보여요. 항목을 누르면 내용이 보여요.</p>
           <div id="progressBoards"></div>
         </section>
       </div>
@@ -362,7 +370,8 @@
     loading: false,
     view: 'room',
     items: [],
-    openDetails: {}
+    openDetails: {},
+    readMark: 0
   };
 
   var $ = function(id){ return document.getElementById(id); };
@@ -501,16 +510,11 @@
     }).join('');
     elSender.value = state.sender;
   }
-  function seenKey(room){ return 'ai_team_room_seen_' + room; }
   function renderRooms(){
     var html = '<div class="label">회의실</div>';
     state.rooms.forEach(function(r){
-      var seen = parseInt(localStorage.getItem(seenKey(r.slug)) || '0', 10);
-      var unread = (r.last_id || 0) > seen && r.slug !== state.room ? (r.message_count || 0) : 0;
-      var badge = '';
-      if (r.slug !== state.room && (r.last_id || 0) > seen){
-        badge = '<span class="cnt">new</span>';
-      }
+      var unread = (r.slug !== state.room) ? (r.unread || 0) : 0;
+      var badge = unread ? '<span class="cnt">' + unread + '</span>' : '';
       html += '<button class="room' + (r.slug === state.room ? ' active' : '') + '" data-room="' + esc(r.slug) + '">' +
         '<span class="hash">#</span>' +
         '<span style="min-width:0"><span class="rname">' + esc(r.name) + '</span>' +
@@ -561,6 +565,7 @@
     state.room = slug;
     state.lastId = 0;
     state.messages = [];
+    state.readMark = 0;
     state.replyTo = null; elReplyBar.hidden = true;
     localStorage.setItem('ai_team_room_room', slug);
     document.body.classList.remove('nav-open');
@@ -625,7 +630,34 @@
     });
     elMessages.innerHTML = html;
     scrollBottom(false);
+    placeDivider();
   }
+  function placeDivider(){
+    var old = document.getElementById('readMarkDiv');
+    if (old) old.remove();
+    var mark = state.readMark || 0;
+    if (!mark) return;
+    var el = null;
+    for (var i = state.messages.length - 1; i >= 0; i--){
+      if (state.messages[i].id <= mark){ el = document.getElementById('m' + state.messages[i].id); break; }
+    }
+    if (!el) return;
+    var div = document.createElement('div');
+    div.className = 'readmark'; div.id = 'readMarkDiv';
+    div.innerHTML = '<span class="ck">✓ 똑똑이 확인완료</span>';
+    el.after(div);
+  }
+  $('markReadBtn').addEventListener('click', function(){
+    var lastId = state.lastId || 0;
+    if (!lastId) return;
+    api('/api/rooms/' + encodeURIComponent(state.room) + '/read-mark', {method:'POST', body: JSON.stringify({last_read_id: lastId})})
+      .then(function(d){
+        state.readMark = d.last_read_id || lastId;
+        placeDivider();
+        loadRooms().catch(function(){});
+      })
+      .catch(function(err){ setStatus(false, '확인 표시 실패 · ' + (err.message || '다시 시도')); });
+  });
   function appendMessages(list){
     if (!list.length) return;
     var stick = nearBottom();
@@ -640,24 +672,32 @@
     elMessages.insertAdjacentHTML('beforeend', html);
     state.messages = state.messages.concat(list);
     if (stick) scrollBottom(true);
+    placeDivider();
+  }
+  function loadReadMark(){
+    return api('/api/rooms/' + encodeURIComponent(state.room) + '/read-mark').then(function(d){
+      state.readMark = d.last_read_id || 0;
+    }).catch(function(){ state.readMark = 0; });
   }
   function loadMessages(initial){
     if (state.loading) return Promise.resolve();
     state.loading = true;
-    var q = '/api/rooms/' + encodeURIComponent(state.room) + '/messages?limit=60' + (state.lastId ? '&after=' + state.lastId : '');
-    return api(q).then(function(d){
-      var list = d.messages || [];
-      if (initial && !state.lastId){
-        state.messages = list;
-        state.lastId = list.length ? list[list.length - 1].id : 0;
-        renderAll();
-      } else if (list.length){
-        state.lastId = list[list.length - 1].id;
-        appendMessages(list);
-      }
-      if (state.lastId) localStorage.setItem(seenKey(state.room), String(state.lastId));
-      setStatus(true, '연결됨 · ' + kstTime(new Date().toISOString()));
-      state.loading = false;
+    var ready = initial ? loadReadMark() : Promise.resolve();
+    return ready.then(function(){
+      var q = '/api/rooms/' + encodeURIComponent(state.room) + '/messages?limit=60' + (state.lastId ? '&after=' + state.lastId : '');
+      return api(q).then(function(d){
+        var list = d.messages || [];
+        if (initial && !state.lastId){
+          state.messages = list;
+          state.lastId = list.length ? list[list.length - 1].id : 0;
+          renderAll();
+        } else if (list.length){
+          state.lastId = list[list.length - 1].id;
+          appendMessages(list);
+        }
+        setStatus(true, '연결됨 · ' + kstTime(new Date().toISOString()));
+        state.loading = false;
+      });
     }).catch(function(err){
       state.loading = false;
       if (err.status === 401){
@@ -831,7 +871,8 @@
   var TRACKS = [
     {key:'threads', name:'스레드', re:/스레드/},
     {key:'reels', name:'릴스', re:/릴스|숏츠/},
-    {key:'cardnews', name:'카드뉴스', re:/카드뉴스|카뉴/}
+    {key:'cardnews', name:'카드뉴스', re:/카드뉴스|카뉴/},
+    {key:'etc', name:'기타', re:/.*/}
   ];
   function trackOf(title){
     var t = String(title || '');
@@ -840,6 +881,7 @@
   }
   function statusLabel(s){
     if (s === 'todo') return '진행 중';
+    if (s === 'waiting') return '대기';
     if (s === 'done') return '완료·확인 대기';
     if (s === 'approved') return '승인됨';
     if (s === 'rejected') return '반려됨';
@@ -850,6 +892,7 @@
     document.body.classList.remove('nav-open');
     elMessages.style.display = 'none';
     elComposer.style.display = 'none';
+    $('markReadBtn').style.display = 'none';
     elApproval.classList.remove('show');
     $('progressView').classList.add('show');
     $('roomName').textContent = '진행 상황';
@@ -873,19 +916,39 @@
     TRACKS.forEach(function(tr){
       var list = sortItems(byTrack[tr.key]);
       var todo = list.filter(function(i){ return i.status === 'todo'; }).length;
+      var wait = list.filter(function(i){ return i.status === 'waiting'; }).length;
       var done = list.filter(function(i){ return i.status === 'done'; }).length;
       var ok = list.filter(function(i){ return i.status === 'approved'; }).length;
-      h += '<div class="grp"><h3><span class="tag">' + esc(tr.name) + '</span> · 진행 중 ' + todo + ' · 완료 대기 ' + done + ' · 승인됨 ' + ok + '</h3>';
+      h += '<div class="grp"><h3><span class="tag">' + esc(tr.name) + '</span> · 진행 중 ' + todo + ' · 대기 ' + wait + ' · 완료 대기 ' + done + ' · 승인됨 ' + ok + '</h3>';
       if (!list.length){
         h += '<div class="empty" style="margin:12px auto">아직 항목이 없어요.</div>';
       } else {
+        var keepNotes = {}, keepLinks = {};
+        document.querySelectorAll('#progressBoards [data-note]').forEach(function(el){ keepNotes[el.getAttribute('data-note')] = el.value; });
+        document.querySelectorAll('#progressBoards [data-link]').forEach(function(el){ keepLinks[el.getAttribute('data-link')] = el.value; });
         list.forEach(function(it){
           var pct = pctOf(it);
-          h += '<div class="appr-item"><div class="t">' + esc(it.title) + '</div>' +
+          var open = !!(state.openDetails && state.openDetails[it.id]);
+          var btns = '';
+          if (it.status === 'todo'){
+            btns = '<div class="btns"><button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
+              '<button class="btn-mini ghost" data-rej="' + it.id + '">반려</button>' +
+              '<button class="btn-mini ghost" data-wait="' + it.id + '">대기</button></div>';
+          } else if (it.status === 'waiting'){
+            btns = '<div class="btns"><button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
+              '<button class="btn-mini" data-resume="' + it.id + '">▶ 진행 재개</button>' +
+              '<button class="btn-mini ghost" data-rej="' + it.id + '">반려</button></div>';
+          } else if (it.status === 'rejected'){
+            btns = '<div class="btns"><button class="btn-mini" data-resume="' + it.id + '">↻ 다시 진행</button></div>';
+          }
+          h += '<div class="appr-item"><div class="t" data-detail="' + it.id + '">' + esc(it.title) + '<span class="tog">' + (open ? ' ▾ 접기' : ' ▸ 내용 보기') + '</span></div>' +
             '<div class="meta2">' + esc(statusLabel(it.status)) + ' ' + esc(groupLabel(it.group_name)) +
             (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + '</div>' +
             '<div class="act">시작 ' + (it.started_at ? fmtTime(it.started_at) : '아직 시작 안 함') + ' · 마지막 활동 ' + (it.last_activity_at ? fmtTime(it.last_activity_at) : '-') + ' · ' + pct + '%</div>' +
-            '<div class="pbar"><div class="pfill" style="width:' + pct + '%"></div></div></div>';
+            '<div class="pbar"><div class="pfill" style="width:' + pct + '%"></div></div>' +
+            (it.reason ? '<div class="act">반려 사유: ' + esc(it.reason) + '</div>' : '') +
+            '<div class="appr-detail' + (open ? ' show' : '') + '">' + (open ? detailHtml(it, keepNotes[it.id], keepLinks[it.id]) : '') + '</div>' +
+            btns + '</div>';
         });
       }
       h += '</div>';
@@ -897,6 +960,7 @@
     document.body.classList.remove('nav-open');
     elMessages.style.display = 'none';
     elComposer.style.display = 'none';
+    $('markReadBtn').style.display = 'none';
     $('progressView').classList.remove('show');
     elApproval.classList.add('show');
     $('roomName').textContent = '결재';
@@ -908,6 +972,7 @@
     state.view = 'room';
     elMessages.style.display = '';
     elComposer.style.display = '';
+    $('markReadBtn').style.display = '';
     elApproval.classList.remove('show');
     $('progressView').classList.remove('show');
     var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
@@ -951,7 +1016,7 @@
     return o.month + '/' + o.day + ' ' + hm;
   }
   function pctOf(it){ return Math.max(0, Math.min(100, parseInt(it.progress, 10) || 0)); }
-  function statusRank(s){ return s === 'todo' ? 0 : s === 'done' ? 1 : s === 'approved' ? 2 : s === 'rejected' ? 3 : 9; }
+  function statusRank(s){ return s === 'todo' ? 0 : s === 'waiting' ? 1 : s === 'done' ? 2 : s === 'approved' ? 3 : s === 'rejected' ? 4 : 9; }
   function sortItems(list){
     return list.slice().sort(function(a, b){
       var r = statusRank(a.status) - statusRank(b.status);
@@ -996,7 +1061,7 @@
           '<div class="meta2">' + esc(groupLabel(it.group_name)) +
           (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') +
           (it.source ? ' · ' + esc(it.source) : '') + '</div>' +
-          '<div class="appr-detail' + (open ? ' show' : '') + '" id="apprDetail' + it.id + '">' + (open ? detailHtml(it, keepNotes[it.id], keepLinks[it.id]) : '') + '</div>' +
+          '<div class="appr-detail' + (open ? ' show' : '') + '">' + (open ? detailHtml(it, keepNotes[it.id], keepLinks[it.id]) : '') + '</div>' +
           '<div class="btns">' +
           '<button class="btn-approve" data-approve="' + it.id + '">승인</button>' +
           '<button class="btn-reject" data-reject="' + it.id + '">반려</button>' +
@@ -1025,12 +1090,51 @@
             '<span class="t">' + esc(it.title) + '</span>' +
             (it.assignee ? '<span class="who2">' + esc(it.assignee) + '</span>' : '') +
             (decided ? '<span class="who2">' + (it.status === 'approved' ? '승인됨' : '반려됨') + '</span>' : '') +
+            (it.status === 'waiting' ? '<span class="who2">대기</span>' : '') +
             '</label>';
         });
         gh += '</div>';
       });
     }
     $('checklistGroups').innerHTML = gh;
+  }
+  function handleDetailClick(e){
+    var dt = e.target.closest('[data-detail]');
+    if (dt){
+      var did = parseInt(dt.getAttribute('data-detail'), 10);
+      var itemEl = dt.closest('.appr-item');
+      var panel = itemEl ? itemEl.querySelector('.appr-detail') : null;
+      var dit = (state.items || []).filter(function(x){ return x.id === did; })[0];
+      if (panel && dit){
+        state.openDetails = state.openDetails || {};
+        if (panel.classList.contains('show')){
+          panel.classList.remove('show');
+          state.openDetails[did] = false;
+          var tog = dt.querySelector('.tog'); if (tog) tog.textContent = ' ▸ 내용 보기';
+        } else {
+          panel.innerHTML = detailHtml(dit);
+          panel.classList.add('show');
+          state.openDetails[did] = true;
+          var tog2 = dt.querySelector('.tog'); if (tog2) tog2.textContent = ' ▾ 접기';
+        }
+      }
+      return true;
+    }
+    var sv = e.target.closest('[data-save-note]');
+    if (sv){
+      var sid = parseInt(sv.getAttribute('data-save-note'), 10);
+      var sitemEl = sv.closest('.appr-item');
+      var noteEl = sitemEl ? sitemEl.querySelector('[data-note]') : null;
+      var linkEl = sitemEl ? sitemEl.querySelector('[data-link]') : null;
+      var pctEl = sitemEl ? sitemEl.querySelector('[data-progress]') : null;
+      var sitem = (state.items || []).filter(function(x){ return x.id === sid; })[0];
+      if (sitem){
+        var pct = pctEl ? Math.max(0, Math.min(100, parseInt(pctEl.value, 10) || 0)) : pctOf(sitem);
+        patchItem(sid, {status: sitem.status, detail: noteEl ? noteEl.value : '', link: linkEl ? linkEl.value : '', progress: pct});
+      }
+      return true;
+    }
+    return false;
   }
   $('pendingList').addEventListener('click', function(e){
     var ap = e.target.closest('[data-approve]');
@@ -1046,39 +1150,33 @@
       patchItem(parseInt(rj.getAttribute('data-reject'), 10), {status:'rejected', reason: reason.trim()});
       return;
     }
-    var dt = e.target.closest('[data-detail]');
-    if (dt){
-      var did = parseInt(dt.getAttribute('data-detail'), 10);
-      var panel = document.getElementById('apprDetail' + did);
-      var dit = (state.items || []).filter(function(x){ return x.id === did; })[0];
-      if (panel && dit){
-        state.openDetails = state.openDetails || {};
-        if (panel.classList.contains('show')){
-          panel.classList.remove('show');
-          state.openDetails[did] = false;
-          var tog = dt.querySelector('.tog'); if (tog) tog.textContent = ' ▸ 내용 보기';
-        } else {
-          panel.innerHTML = detailHtml(dit);
-          panel.classList.add('show');
-          state.openDetails[did] = true;
-          var tog2 = dt.querySelector('.tog'); if (tog2) tog2.textContent = ' ▾ 접기';
-        }
-      }
+    handleDetailClick(e);
+  });
+  $('progressBoards').addEventListener('click', function(e){
+    var dn = e.target.closest('[data-done]');
+    if (dn){
+      patchItem(parseInt(dn.getAttribute('data-done'), 10), {status:'done', progress:100});
       return;
     }
-    var sv = e.target.closest('[data-save-note]');
-    if (sv){
-      var sid = parseInt(sv.getAttribute('data-save-note'), 10);
-      var noteEl = document.querySelector('[data-note="' + sid + '"]');
-      var linkEl = document.querySelector('[data-link="' + sid + '"]');
-      var sitem = (state.items || []).filter(function(x){ return x.id === sid; })[0];
-      if (sitem){
-        var pctEl = document.querySelector('[data-progress="' + sid + '"]');
-        var pct = pctEl ? Math.max(0, Math.min(100, parseInt(pctEl.value, 10) || 0)) : pctOf(sitem);
-        patchItem(sid, {status: sitem.status, detail: noteEl ? noteEl.value : '', link: linkEl ? linkEl.value : '', progress: pct});
-      }
+    var rj = e.target.closest('[data-rej]');
+    if (rj){
+      var reason = prompt('반려 사유를 입력하세요');
+      if (reason === null) return;
+      if (!reason.trim()){ alert('반려 사유를 입력하세요.'); return; }
+      patchItem(parseInt(rj.getAttribute('data-rej'), 10), {status:'rejected', reason: reason.trim()});
       return;
     }
+    var wt = e.target.closest('[data-wait]');
+    if (wt){
+      patchItem(parseInt(wt.getAttribute('data-wait'), 10), {status:'waiting'});
+      return;
+    }
+    var rs = e.target.closest('[data-resume]');
+    if (rs){
+      patchItem(parseInt(rs.getAttribute('data-resume'), 10), {status:'todo', reason:''});
+      return;
+    }
+    handleDetailClick(e);
   });
   $('checklistGroups').addEventListener('change', function(e){
     var cb = e.target.closest('[data-check]');
