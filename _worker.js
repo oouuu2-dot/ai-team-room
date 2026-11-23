@@ -136,9 +136,6 @@ async function ensureRooms(env) {
     await env.DB.prepare(
       `insert or ignore into rooms (slug, name, description, position) values ('threads', '스레드', '스레드 분석·벤치마킹·발행 준비', 8)`
     ).run();
-    await env.DB.prepare(
-      `insert or ignore into rooms (slug, name, description, position) values ('pickles', '피클 토론방', '피클1·피클2가 토론하고 결과를 내는 방', 9)`
-    ).run();
   } catch (e) {
     // rooms 테이블이 아직 없으면 아래 SELECT가 기존처럼 에러를 냅니다.
   }
