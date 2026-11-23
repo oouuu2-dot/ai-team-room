@@ -1,18 +1,15 @@
-# Cloudflare Pages 프로젝트 설정 — 선택 사항 (Wrangler v3.45 이상)
-#
-# 이 파일을 쓰면 설정을 코드로 관리할 수 있습니다. 쓰지 않으려면(대시보드에서 직접 설정)
-# 이 파일을 지우고 README 의 "대시보드 방식"만 따라 하세요. 두 방식을 섞으면 헷갈립니다.
-#
-# 1) 아래 YOUR_D1_DATABASE_ID 를 `npx wrangler d1 create ai-team-room` 결과의 database_id 로 바꾸세요.
-# 2) ROOM_KEY / API_KEY 는 이 파일에 적지 말고 Secret 으로 넣으세요.
-#    npx wrangler pages secret put ROOM_KEY
-#    npx wrangler pages secret put API_KEY
+# Cloudflare Workers 설정 (GitHub 연동 배포용)
+# Pages 방식이 아니라 Workers 방식으로 배포합니다.
+# ROOM_KEY / API_KEY 는 이 파일에 적지 말고 대시보드 Settings > Variables 에서 Secret 으로 넣으세요.
 
 name = "ai-team-room"
-pages_build_output_dir = "."
+main = "_worker.js"
 compatibility_date = "2026-11-01"
+
+[assets]
+directory = "."
 
 [[d1_databases]]
 binding = "DB"
 database_name = "ai-team-room"
-database_id = "YOUR_D1_DATABASE_ID"
+database_id = "bee04f5a-f4ce-4367-972d-7f5ff20f2811"
