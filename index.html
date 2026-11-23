@@ -76,6 +76,8 @@
   .markbtn:hover{border-color:var(--accent);color:var(--accent)}
   .btn-mini{background:var(--accent);border:0;border-radius:8px;color:#fff;font-weight:700;padding:6px 12px;font-size:12px;cursor:pointer}
   .btn-mini.ghost{background:#fff;border:1px solid var(--line);color:var(--text)}
+  .readbar{display:flex;justify-content:center;padding:8px 12px;border-top:1px solid var(--line);background:var(--panel)}
+  .readbar .markbtn{font-size:13px;padding:9px 20px}
   .pill{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:4px 10px;white-space:nowrap;background:#fff}
   .pill.live{color:#15803d;border-color:#bbf7d0;background:#f0fdf4}
 
@@ -308,6 +310,7 @@
       </div>
     </div>
 
+    <div class="readbar" id="readBar"><button class="markbtn" id="markReadBtn2">✓ 여기까지 읽었어요</button></div>
     <div class="composer" id="composer">
       <div class="replybar" id="replyBar" hidden>
         <span>답글 →</span><b id="replyWho"></b><span id="replySnippet" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
@@ -647,7 +650,7 @@
     div.innerHTML = '<span class="ck">✓ 똑똑이 확인완료</span>';
     el.after(div);
   }
-  $('markReadBtn').addEventListener('click', function(){
+  function markRead(){
     var lastId = state.lastId || 0;
     if (!lastId) return;
     api('/api/rooms/' + encodeURIComponent(state.room) + '/read-mark', {method:'POST', body: JSON.stringify({last_read_id: lastId})})
@@ -657,7 +660,9 @@
         loadRooms().catch(function(){});
       })
       .catch(function(err){ setStatus(false, '확인 표시 실패 · ' + (err.message || '다시 시도')); });
-  });
+  }
+  $('markReadBtn').addEventListener('click', markRead);
+  $('markReadBtn2').addEventListener('click', markRead);
   function appendMessages(list){
     if (!list.length) return;
     var stick = nearBottom();
@@ -893,6 +898,7 @@
     elMessages.style.display = 'none';
     elComposer.style.display = 'none';
     $('markReadBtn').style.display = 'none';
+    $('readBar').style.display = 'none';
     elApproval.classList.remove('show');
     $('progressView').classList.add('show');
     $('roomName').textContent = '진행 상황';
@@ -961,6 +967,7 @@
     elMessages.style.display = 'none';
     elComposer.style.display = 'none';
     $('markReadBtn').style.display = 'none';
+    $('readBar').style.display = 'none';
     $('progressView').classList.remove('show');
     elApproval.classList.add('show');
     $('roomName').textContent = '결재';
@@ -973,6 +980,7 @@
     elMessages.style.display = '';
     elComposer.style.display = '';
     $('markReadBtn').style.display = '';
+    $('readBar').style.display = '';
     elApproval.classList.remove('show');
     $('progressView').classList.remove('show');
     var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
