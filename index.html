@@ -935,6 +935,10 @@
         list.forEach(function(it){
           var pct = pctOf(it);
           var open = !!(state.openDetails && state.openDetails[it.id]);
+          var conf = '';
+          if (it.assignee && (it.status === 'todo' || it.status === 'waiting')){
+            conf = it.started_at ? ' · ✓ 확인됨 ' + fmtTime(it.started_at) : ' · 확인 대기';
+          }
           var btns = '';
           if (it.status === 'todo'){
             btns = '<div class="btns"><button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
@@ -949,7 +953,7 @@
           }
           h += '<div class="appr-item"><div class="t" data-detail="' + it.id + '">' + esc(it.title) + '<span class="tog">' + (open ? ' ▾ 접기' : ' ▸ 내용 보기') + '</span></div>' +
             '<div class="meta2">' + esc(statusLabel(it.status)) + ' ' + esc(groupLabel(it.group_name)) +
-            (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + '</div>' +
+            (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + conf + '</div>' +
             '<div class="act">시작 ' + (it.started_at ? fmtTime(it.started_at) : '아직 시작 안 함') + ' · 마지막 활동 ' + (it.last_activity_at ? fmtTime(it.last_activity_at) : '-') + ' · ' + pct + '%</div>' +
             '<div class="pbar"><div class="pfill" style="width:' + pct + '%"></div></div>' +
             (it.reason ? '<div class="act">반려 사유: ' + esc(it.reason) + '</div>' : '') +
@@ -1097,6 +1101,7 @@
             '<input type="checkbox" data-check="' + it.id + '"' + (done ? ' checked' : '') + (decided ? ' disabled' : '') + '>' +
             '<span class="t">' + esc(it.title) + '</span>' +
             (it.assignee ? '<span class="who2">' + esc(it.assignee) + '</span>' : '') +
+            (it.assignee && (it.status === 'todo' || it.status === 'waiting') ? '<span class="who2">' + (it.started_at ? '✓ 확인됨' : '확인 대기') + '</span>' : '') +
             (decided ? '<span class="who2">' + (it.status === 'approved' ? '승인됨' : '반려됨') + '</span>' : '') +
             (it.status === 'waiting' ? '<span class="who2">대기</span>' : '') +
             '</label>';
