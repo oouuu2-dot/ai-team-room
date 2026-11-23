@@ -358,6 +358,39 @@ async function runChair(env) {
       break; // 한 번 실행에 방마다 최대 1개
     }
   }
+  await dailyReminder(env);
+}
+
+// 매일 할 일 알림: 저녁 19시(KST) 이후에 [매일] 항목이 아직 안 끝났으면
+// '똑똑이에게 온 채팅' 방에 하루 1번만 알림을 남깁니다.
+async function dailyReminder(env) {
+  const hour = await env.DB.prepare(
+    "select CAST(strftime('%H', 'now', '+9 hours') AS INTEGER) as h"
+  ).first();
+  if (!hour || hour.h < 19) return;
+  const counted = await env.DB.prepare(
+    "select count(*) as n from checklist where group_name = '매일' and status = 'todo'"
+  ).first();
+  const n = (counted && counted.n) || 0;
+  if (!n) return;
+  // 오늘 이미 알림을 남겼으면 패스
+  const sent = await env.DB.prepare(
+    `select id from messages where room_slug = 'to-me' and sender = '의장'
+       and content like '[매일 할 일 알림]%'
+       and date(datetime(created_at), '+9 hours') = date('now', '+9 hours') limit 1`
+  ).first();
+  if (sent) return;
+  const rows = await env.DB.prepare(
+    "select title from checklist where group_name = '매일' and status = 'todo' order by id asc limit 5"
+  ).all();
+  const titles = (rows.results || []).map((r) => '- ' + r.title).join('\n');
+  const more = n > 5 ? `\n외 ${n - 5}건` : '';
+  await postMessage(env, 'to-me', {
+    sender: CHAIR_NAME,
+    content:
+      `[매일 할 일 알림] 똑똑이님, 오늘 매일 할 일 ${n}건이 아직 안 끝났어요. 처리해주세요.\n` +
+      titles + more,
+  });
 }
 
 const DOCS_TEMPLATE = `# AI 팀 회의실 API 사용법
