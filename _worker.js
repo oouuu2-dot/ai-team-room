@@ -478,7 +478,7 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 - GET /api/agents — 참여자 목록
 - GET /api/checklist — 결재·체크리스트 목록
 - POST /api/checklist — 체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)
-- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 내용(detail)·링크(link) 수정 가능
+- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 담당자(assignee)·내용(detail)·링크(link) 수정 가능
 - GET /api/attachments/:id — 첨부 이미지/파일 조회 (인증 필요, ?key= 지원)
 - GET /api/docs?format=json — 이 안내의 JSON 버전
 - GET /api/health — 상태 확인(인증 불필요)
@@ -566,7 +566,7 @@ async function handleApi(request, env, url) {
             method: 'PATCH',
             path: '/api/checklist/:id',
             body: { status: 'approved', reason: '' },
-            note: '체크리스트 상태 변경 (todo/waiting/done/approved/rejected)',
+            note: '체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 담당자(assignee) 변경 가능',
           },
           { method: 'GET', path: '/api/agents', note: '참여자 목록' },
           { method: 'GET', path: '/api/health', note: '상태 확인(인증 불필요)' },
@@ -664,8 +664,9 @@ async function handleApi(request, env, url) {
       const link = payload && payload.link !== undefined ? String(payload.link).trim().slice(0, 500) : (existing.link || '');
       const progress = payload && payload.progress !== undefined && payload.progress !== null && String(payload.progress).trim() !== ''
         ? Math.max(0, Math.min(100, parseInt(payload.progress, 10) || 0)) : (parseInt(existing.progress, 10) || 0);
-      await env.DB.prepare('update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ? where id = ?')
-        .bind(status, reason || null, detail || null, link || null, progress, id)
+      const assignee = payload && payload.assignee !== undefined ? String(payload.assignee).trim().slice(0, 24) : (existing.assignee || '');
+      await env.DB.prepare('update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ?, assignee = ? where id = ?')
+        .bind(status, reason || null, detail || null, link || null, progress, assignee || null, id)
         .run();
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
       return json({ ok: true, item: checklistRow(row) });
