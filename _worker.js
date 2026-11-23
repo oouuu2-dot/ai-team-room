@@ -280,14 +280,23 @@ async function ensureTelegram(env) {
 }
 
 function telegramEligible(row) {
-  return row.room_slug === 'to-me' || String(row.content || '').includes('@똑똑이');
+  return row.sender !== '똑똑이' || row.room_slug === 'to-me' || String(row.content || '').includes('@똑똑이');
 }
 
 function telegramSummary(roomName, row) {
-  const text = `[${roomName}] ${String(row.sender || '').trim()}: ${String(row.content || '')}`;
-  const clipped = text.slice(0, 4096);
-  // Do not send half of a UTF-16 surrogate pair at the message boundary.
-  return /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
+  const escape = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const clip = (text, max) => {
+    const part = String(text).slice(0, Math.max(0, max));
+    return /[\uD800-\uDBFF]$/.test(part) ? part.slice(0, -1) : part;
+  };
+  const content = String(row.content || '');
+  const attention = row.room_slug === 'to-me' || content.includes('@똑똑이');
+  const marker = attention ? '❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️\n똑똑이 확인\n' : '';
+  const summary = clip(content.split(/\r?\n/).find((line) => line.trim()) || '진행 내용', 160);
+  const heading = marker + `[${roomName}] ${String(row.sender || '').trim()}\n` + summary + '\n';
+  // Telegram limits text after HTML parsing. Escape after clipping the visible body.
+  const body = clip(content, 4096 - heading.length);
+  return escape(heading) + '<blockquote expandable>' + escape(body) + '</blockquote>';
 }
 
 async function queueTelegram(env, row) {
@@ -320,7 +329,7 @@ async function flushTelegram(env) {
       const body = telegramSummary(room ? room.name : original.room_slug, original);
       const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: body }),
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: body, parse_mode: 'HTML' }),
         signal: AbortSignal.timeout(15000),
       });
       const result = await response.json();

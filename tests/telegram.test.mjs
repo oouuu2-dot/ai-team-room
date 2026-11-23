@@ -83,18 +83,20 @@ test('webhook authenticates group and person, deduplicates and never echoes', as
   assert.equal(f.db.prepare('select count(*) n from telegram_outbox').get().n, 0);
   f.db.close();
 });
-test('only to-me and owner mentions are delivered, preserving the full body', async () => {
+test('all progress is delivered folded, with attention markers only where needed', async () => {
   const f = fixture();
   for (const [room, content] of [['general','평범한 글'], ['to-me','질문'], ['blog','@똑똑이 확인'], ['general','[피클 브리핑] 오늘'], ['store','작업 완료\n둘\n셋\n넷']])
     await f.api.postMessage(f.env, room, { sender: '코덱스', content });
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
-  assert.equal(f.sent.length, 2);
-  assert.equal(f.sent[0].text, '[똑똑이에게 온 채팅] 코덱스: 질문');
-  assert.equal(f.sent[1].text, '[블로그] 코덱스: @똑똑이 확인');
+  assert.equal(f.sent.length, 5);
+  assert.match(f.sent[1].text, /^❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️\n똑똑이 확인\n/);
+  assert.match(f.sent[2].text, /^❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️\n똑똑이 확인\n/);
+  assert.ok(!f.sent[0].text.includes('똑똑이 확인'));
+  assert.ok(f.sent.every((message) => message.parse_mode === 'HTML' && message.text.includes('<blockquote expandable>')));
   const full = '첫 줄\n\n두 번째\n세 번째\n네 번째';
-  assert.equal(f.api.telegramSummary('종합',{sender:'코덱스',content:full}), '[종합] 코덱스: '+full);
+  assert.ok(f.api.telegramSummary('종합',{sender:'코덱스',content:full}).includes('<blockquote expandable>'+full+'</blockquote>'));
   const long = f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(5000) });
-  assert.equal(long.length,4096); assert.ok(!long.endsWith('…')); assert.ok(!long.endsWith('...'));
+  assert.equal(long.replace(/<[^>]*>/g,'').length,4096); assert.ok(!long.includes('…')); assert.ok(!long.includes('...'));
   f.db.close();
 });
 test('failed deliveries remain queued for cron retry', async () => {
@@ -114,7 +116,7 @@ test('Telegram questions are picked up by the existing chair rules', async () =>
   f.db.close();
 });
 
-test('Pickle commands route but only owner-directed discussion is notified', async () => {
+test('Pickle commands route and discussion is sent without inbound echo', async () => {
   const f = fixture();
   f.db.exec("delete from rooms where slug='pickles'");
   for (const prefix of ['/pickles ', '/피클 ', '/피클토론 ', '피클:', '피클토론:']) {
@@ -129,20 +131,32 @@ test('Pickle commands route but only owner-directed discussion is notified', asy
   await f.api.postMessage(f.env,'pickles',{sender:'피클2',content:'두 번째 의견입니다'});
   await f.api.postMessage(f.env,'pickles',{sender:'피클2',content:'@똑똑이 최종 의견입니다'});
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
-  assert.equal(f.sent.length,1);
-  assert.match(f.sent[0].text,/피클 토론방.*피클2.*@똑똑이/);
+  assert.equal(f.sent.length,3);
+  assert.match(f.sent[0].text,/피클 토론방.*피클1/);
+  assert.match(f.sent[2].text,/피클 토론방.*피클2/);
   f.db.close();
 });
 
-test('old queued messages are filtered again and eligible old previews use the full original', async () => {
+test('old queued messages are regenerated in the current folded format', async () => {
   const f=fixture();
   await f.api.postMessage(f.env,'general',{sender:'코덱스',content:'그냥 완료'});
   await f.api.postMessage(f.env,'general',{sender:'코덱스',content:'@똑똑이 하나\n둘\n셋\n넷'});
-  f.db.prepare('insert into telegram_outbox(message_id,text) values(1,?)').run('이전 완료 알림');
+  f.db.prepare('update telegram_outbox set text=? where message_id=1').run('이전 완료 알림');
   f.db.exec("update telegram_outbox set text='이전 잘린 요약…' where message_id=2");
   await f.api.flushTelegram(f.env);
-  assert.equal(f.sent.length,1);
-  assert.equal(f.sent[0].text,'[종합] 코덱스: @똑똑이 하나\n둘\n셋\n넷');
-  assert.equal(f.db.prepare('select count(*) n from telegram_outbox where message_id=1').get().n,0);
+  assert.equal(f.sent.length,2);
+  assert.ok(f.sent[1].text.includes('<blockquote expandable>@똑똑이 하나\n둘\n셋\n넷</blockquote>'));
+  f.db.close();
+});
+
+test('folded HTML escapes user text and keeps Unicode message boundaries valid', () => {
+  const f=fixture();
+  const html=f.api.telegramSummary('<방>',{room_slug:'to-me',sender:'<AI>',content:'<b>안녕</b> & 확인'});
+  assert.ok(html.includes('&lt;b&gt;안녕&lt;/b&gt; &amp; 확인'));
+  assert.ok(!html.includes('<b>'));
+  const long=f.api.telegramSummary('종합',{sender:'코덱스',content:'😀'.repeat(5000)});
+  const visible=long.replace(/<[^>]*>/g,'');
+  assert.ok(visible.length<=4096);
+  assert.ok(!/[\uD800-\uDBFF]$/.test(visible));
   f.db.close();
 });
