@@ -344,6 +344,20 @@ function routeQuestion(content) {
   return '뮤즈';
 }
 
+// 할 일 제목·담당자로 그 일이 있는 방을 정합니다 (방으로 가기·재촉용).
+function roomForItem(title, assignee) {
+  const t = String(title || '');
+  if (/스레드|드레쓰/.test(t)) return 'threads';
+  if (/카드뉴스|카뉴|릴스|숏츠|인스타/.test(t)) return 'instagram';
+  if (/블로그|원고|전자책/.test(t)) return 'blog';
+  if (/스마트스토어|상품명|애플파이|순위/.test(t)) return 'store';
+  if (assignee === '피클1') return 'instagram';
+  if (assignee === '피클2') return 'threads';
+  if (assignee === '클로드') return 'blog';
+  if (assignee === '브이' || assignee === '부이' || assignee === '부이~') return 'store';
+  return 'general';
+}
+
 function questionSummary(content) {
   const one = String(content || '').replace(/\s+/g, ' ').trim();
   return one.length > 200 ? one.slice(0, 200) + '…' : one;
@@ -392,6 +406,36 @@ async function runChair(env) {
     }
   }
   await dailyReminder(env);
+  await stallNudge(env);
+}
+
+// 안 진행되는 일 재촉: 배정받고 1시간이 지나도 확인 답글이 없으면 의장이 1시간마다 불러서 확인을 재촉합니다.
+// (키링은 회의실에 없어서 제외. 같은 담당자는 4시간 안에 한 번만 부릅니다.)
+async function stallNudge(env) {
+  const m = await env.DB.prepare(
+    "select CAST(strftime('%M', 'now', '+9 hours') AS INTEGER) as mm"
+  ).first();
+  if (!m || m.mm >= 10) return; // 매시 정각 사이클에만 1번
+  const rows = await env.DB.prepare(
+    `select c.id, c.title, c.assignee from checklist c
+       where c.status in ('todo', 'waiting') and c.assignee is not null and c.assignee != '' and c.assignee != '키링'
+         and datetime(c.created_at) <= datetime('now', '-1 hour')
+         and not exists (select 1 from messages m where m.sender = c.assignee and m.created_at > c.created_at)
+       order by c.id asc limit 3`
+  ).all();
+  const items = rows.results || [];
+  for (const it of items) {
+    const room = roomForItem(it.title, it.assignee);
+    const called = await env.DB.prepare(
+      `select id from messages where room_slug = ? and sender = '의장'
+         and content like ? and datetime(created_at) >= datetime('now', '-4 hours') limit 1`
+    ).bind(room, `%@${it.assignee}%`).first();
+    if (called) continue;
+    await postMessage(env, room, {
+      sender: CHAIR_NAME,
+      content: `@${it.assignee}, '${it.title}' 아직 확인 전이에요. '네, 확인했습니다. 진행하겠습니다.'라고 답해주세요. 진행 상황도 알려주세요.`,
+    });
+  }
 }
 
 // 매일 할 일 알림: 저녁 19시(KST) 이후에 [매일] 항목이 아직 안 끝났으면

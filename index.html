@@ -205,6 +205,8 @@
   .chk input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
   .chk .t{flex:1;font-size:14px}
   .chk.done .t{text-decoration:line-through;color:var(--muted)}
+  .chkrow{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .chkrow .chk{flex:1;margin-bottom:0}
   .chk .who2{font-size:11px;color:var(--muted)}
   .add-row{display:flex;gap:8px;margin-top:4px}
   .add-row input{flex:1;background:#faf9f7;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font:inherit;font-size:14px;outline:none}
@@ -884,6 +886,32 @@
     for (var i = 0; i < TRACKS.length; i++){ if (TRACKS[i].re.test(t)) return TRACKS[i]; }
     return null;
   }
+  function roomForItem(title, assignee){
+    var t = String(title || '');
+    if (/스레드|드레쓰/.test(t)) return 'threads';
+    if (/카드뉴스|카뉴|릴스|숏츠|인스타/.test(t)) return 'instagram';
+    if (/블로그|원고|전자책/.test(t)) return 'blog';
+    if (/스마트스토어|상품명|애플파이|순위/.test(t)) return 'store';
+    if (assignee === '피클1') return 'instagram';
+    if (assignee === '피클2') return 'threads';
+    if (assignee === '클로드') return 'blog';
+    if (assignee === '브이' || assignee === '부이' || assignee === '부이~') return 'store';
+    return 'general';
+  }
+  function goToRoom(slug, who){
+    if (!slug) return;
+    switchRoom(slug);
+    var inp = $('input');
+    if (inp){
+      if (!inp.value && who) inp.value = '@' + who + ' ';
+      inp.focus();
+    }
+  }
+  document.addEventListener('click', function(e){
+    var g = e.target.closest('[data-goto]');
+    if (!g) return;
+    goToRoom(g.getAttribute('data-goto'), g.getAttribute('data-who') || '');
+  });
   function statusLabel(s){
     if (s === 'todo') return '진행 중';
     if (s === 'waiting') return '대기';
@@ -939,18 +967,20 @@
           if (it.assignee && (it.status === 'todo' || it.status === 'waiting')){
             conf = it.started_at ? ' · ✓ 확인됨 ' + fmtTime(it.started_at) : ' · 확인 대기';
           }
-          var btns = '';
+          var btnsInner = '';
           if (it.status === 'todo'){
-            btns = '<div class="btns"><button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
+            btnsInner = '<button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
               '<button class="btn-mini ghost" data-rej="' + it.id + '">반려</button>' +
-              '<button class="btn-mini ghost" data-wait="' + it.id + '">대기</button></div>';
+              '<button class="btn-mini ghost" data-wait="' + it.id + '">대기</button>';
           } else if (it.status === 'waiting'){
-            btns = '<div class="btns"><button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
+            btnsInner = '<button class="btn-mini" data-done="' + it.id + '">✓ 완료</button>' +
               '<button class="btn-mini" data-resume="' + it.id + '">▶ 진행 재개</button>' +
-              '<button class="btn-mini ghost" data-rej="' + it.id + '">반려</button></div>';
+              '<button class="btn-mini ghost" data-rej="' + it.id + '">반려</button>';
           } else if (it.status === 'rejected'){
-            btns = '<div class="btns"><button class="btn-mini" data-resume="' + it.id + '">↻ 다시 진행</button></div>';
+            btnsInner = '<button class="btn-mini" data-resume="' + it.id + '">↻ 다시 진행</button>';
           }
+          btnsInner += '<button class="btn-mini ghost" data-goto="' + roomForItem(it.title, it.assignee) + '" data-who="' + esc(it.assignee || '') + '">💬 방으로 가기</button>';
+          var btns = '<div class="btns">' + btnsInner + '</div>';
           h += '<div class="appr-item"><div class="t" data-detail="' + it.id + '">' + esc(it.title) + '<span class="tog">' + (open ? ' ▾ 접기' : ' ▸ 내용 보기') + '</span></div>' +
             '<div class="meta2">' + esc(statusLabel(it.status)) + ' ' + esc(groupLabel(it.group_name)) +
             (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + conf + '</div>' +
@@ -1077,6 +1107,7 @@
           '<div class="btns">' +
           '<button class="btn-approve" data-approve="' + it.id + '">승인</button>' +
           '<button class="btn-reject" data-reject="' + it.id + '">반려</button>' +
+          '<button class="btn-mini ghost" data-goto="' + roomForItem(it.title, it.assignee) + '" data-who="' + esc(it.assignee || '') + '">💬 방으로 가기</button>' +
           '</div></div>';
       });
     }
@@ -1097,14 +1128,15 @@
         sortItems(byGroup[g]).forEach(function(it){
           var done = it.status === 'done';
           var decided = it.status === 'approved' || it.status === 'rejected';
-          gh += '<label class="chk' + (done ? ' done' : '') + '">' +
+          gh += '<div class="chkrow"><label class="chk' + (done ? ' done' : '') + '">' +
             '<input type="checkbox" data-check="' + it.id + '"' + (done ? ' checked' : '') + (decided ? ' disabled' : '') + '>' +
             '<span class="t">' + esc(it.title) + '</span>' +
             (it.assignee ? '<span class="who2">' + esc(it.assignee) + '</span>' : '') +
             (it.assignee && (it.status === 'todo' || it.status === 'waiting') ? '<span class="who2">' + (it.started_at ? '✓ 확인됨' : '확인 대기') + '</span>' : '') +
             (decided ? '<span class="who2">' + (it.status === 'approved' ? '승인됨' : '반려됨') + '</span>' : '') +
             (it.status === 'waiting' ? '<span class="who2">대기</span>' : '') +
-            '</label>';
+            '</label>' +
+            '<button class="btn-mini ghost" data-goto="' + roomForItem(it.title, it.assignee) + '" data-who="' + esc(it.assignee || '') + '">방으로 가기</button></div>';
         });
         gh += '</div>';
       });
