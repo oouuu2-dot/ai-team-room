@@ -283,7 +283,7 @@
 
     <div class="messages" id="messages"></div>
 
-    <div class="approval" id="approvalView">
+    <div class="approval" id="progressView">
       <div class="appr-wrap">
         <section class="appr-sec">
           <h2>결재 대기 <span class="appr-count" id="pendingCount">0건</span></h2>
@@ -291,23 +291,16 @@
           <div id="pendingList"></div>
         </section>
         <section class="appr-sec">
-          <h2>할 일·지시 체크리스트</h2>
-          <p class="appr-desc">[매일]은 노션에서 가져온 일, [날짜]는 회의실에서 추가한 오늘의 일이에요.</p>
-          <div id="checklistGroups"></div>
+          <h2>진행 상황 <span class="appr-count" id="progressCount">0건 진행 중</span></h2>
+          <p class="appr-desc">지시방 지시와 체크리스트를 스레드·릴스·카드뉴스·기타로 모아서 보여요. 항목을 누르면 내용이 보여요.</p>
+          <div id="progressBoards"></div>
+        </section>
+        <section class="appr-sec">
+          <h2>새 할 일 추가</h2>
           <div class="add-row">
             <input id="newItemTitle" type="text" placeholder="새 할 일 / 지시 입력">
             <button id="addItemBtn">추가</button>
           </div>
-        </section>
-      </div>
-    </div>
-
-    <div class="approval" id="progressView">
-      <div class="appr-wrap">
-        <section class="appr-sec">
-          <h2>진행 상황 <span class="appr-count" id="progressCount">0건 진행 중</span></h2>
-          <p class="appr-desc">지시방 지시와 체크리스트를 스레드·릴스·카드뉴스·기타로 모아서 보여요. 항목을 누르면 내용이 보여요.</p>
-          <div id="progressBoards"></div>
         </section>
       </div>
     </div>
@@ -527,19 +520,12 @@
         badge + '</button>';
     });
     var pendingN = (state.items || []).filter(function(i){ return i.status === 'done'; }).length;
-    html += '<div class="label" style="margin-top:10px">결재</div>' +
-      '<button class="room' + (state.view === 'approval' ? ' active' : '') + '" id="approvalBtn">' +
-      '<span class="hash">✓</span>' +
-      '<span style="min-width:0"><span class="rname">결재</span>' +
-      '<span class="rdesc" style="display:block">할 일·지시 체크 · 승인</span></span>' +
-      '<span class="cnt" id="approvalBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
-      '</button>';
-    var trackN = (state.items || []).filter(function(i){ return i.status === 'todo' && trackOf(i.title); }).length;
-    html += '<button class="room' + (state.view === 'progress' ? ' active' : '') + '" id="progressBtn">' +
+    html += '<div class="label" style="margin-top:10px">진행·결재</div>' +
+      '<button class="room' + (state.view === 'progress' ? ' active' : '') + '" id="progressBtn">' +
       '<span class="hash">📊</span>' +
       '<span style="min-width:0"><span class="rname">진행 상황</span>' +
-      '<span class="rdesc" style="display:block">스레드·릴스·카드뉴스 진행</span></span>' +
-      '<span class="cnt" id="progressBadge"' + (trackN ? '' : ' style="display:none"') + '>' + trackN + '</span>' +
+      '<span class="rdesc" style="display:block">결재 대기 · 스레드·릴스·카드뉴스 진행</span></span>' +
+      '<span class="cnt" id="progressBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
       '</button>';
     elRoomList.innerHTML = html;
     Array.prototype.forEach.call(elRoomList.querySelectorAll('.room'), function(btn){
@@ -547,8 +533,6 @@
         switchRoom(btn.getAttribute('data-room'));
       });
     });
-    var ab = elRoomList.querySelector('#approvalBtn');
-    if (ab) ab.addEventListener('click', showApproval);
     var pb = elRoomList.querySelector('#progressBtn');
     if (pb) pb.addEventListener('click', showProgress);
   }
@@ -866,7 +850,7 @@
   });
 
   /* ---------- 결재 ---------- */
-  var elApproval = $('approvalView'), elComposer = $('composer');
+  var elComposer = $('composer');
   function todayLabel(){
     var d = new Date(Date.now() + 9 * 60 * 60 * 1000);
     return (d.getUTCMonth() + 1) + '.' + ('0' + d.getUTCDate()).slice(-2);
@@ -927,10 +911,9 @@
     elComposer.style.display = 'none';
     $('markReadBtn').style.display = 'none';
     $('readBar').style.display = 'none';
-    elApproval.classList.remove('show');
     $('progressView').classList.add('show');
     $('roomName').textContent = '진행 상황';
-    $('roomDesc').textContent = '스레드·릴스·카드뉴스 진행 상황';
+    $('roomDesc').textContent = '결재 대기 · 스레드·릴스·카드뉴스 진행';
     renderRooms();
     loadChecklist();
   }
@@ -944,8 +927,6 @@
     });
     var inProg = items.filter(function(i){ return i.status === 'todo' && trackOf(i.title); }).length;
     $('progressCount').textContent = inProg + '건 진행 중';
-    var badge = $('progressBadge');
-    if (badge){ badge.style.display = inProg ? '' : 'none'; badge.textContent = inProg; }
     var h = '';
     TRACKS.forEach(function(tr){
       var list = sortItems(byTrack[tr.key]);
@@ -995,27 +976,12 @@
     });
     $('progressBoards').innerHTML = h;
   }
-  function showApproval(){
-    state.view = 'approval';
-    document.body.classList.remove('nav-open');
-    elMessages.style.display = 'none';
-    elComposer.style.display = 'none';
-    $('markReadBtn').style.display = 'none';
-    $('readBar').style.display = 'none';
-    $('progressView').classList.remove('show');
-    elApproval.classList.add('show');
-    $('roomName').textContent = '결재';
-    $('roomDesc').textContent = '완료된 일 승인 · 할 일·지시 체크';
-    renderRooms();
-    loadChecklist();
-  }
   function showRoomView(){
     state.view = 'room';
     elMessages.style.display = '';
     elComposer.style.display = '';
     $('markReadBtn').style.display = '';
     $('readBar').style.display = '';
-    elApproval.classList.remove('show');
     $('progressView').classList.remove('show');
     var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
     if (cur){
@@ -1085,7 +1051,7 @@
     var items = state.items || [];
     var pending = items.filter(function(i){ return i.status === 'done'; });
     $('pendingCount').textContent = pending.length + '건';
-    var badge = $('approvalBadge');
+    var badge = $('progressBadge');
     if (badge){
       badge.style.display = pending.length ? '' : 'none';
       badge.textContent = pending.length;
@@ -1112,36 +1078,6 @@
       });
     }
     $('pendingList').innerHTML = ph;
-
-    var groups = [], byGroup = {};
-    items.forEach(function(it){
-      var g = it.group_name || '오늘';
-      if (!byGroup[g]){ byGroup[g] = []; groups.push(g); }
-      byGroup[g].push(it);
-    });
-    var gh = '';
-    if (!items.length){
-      gh = '<div class="empty" style="margin:12px auto">아직 항목이 없어요. 아래에서 추가하세요.</div>';
-    } else {
-      groups.forEach(function(g){
-        gh += '<div class="grp"><h3><span class="tag">' + esc(groupLabel(g)) + '</span></h3>';
-        sortItems(byGroup[g]).forEach(function(it){
-          var done = it.status === 'done';
-          var decided = it.status === 'approved' || it.status === 'rejected';
-          gh += '<div class="chkrow"><label class="chk' + (done ? ' done' : '') + '">' +
-            '<input type="checkbox" data-check="' + it.id + '"' + (done ? ' checked' : '') + (decided ? ' disabled' : '') + '>' +
-            '<span class="t">' + esc(it.title) + '</span>' +
-            (it.assignee ? '<span class="who2">' + esc(it.assignee) + '</span>' : '') +
-            (it.assignee && (it.status === 'todo' || it.status === 'waiting') ? '<span class="who2">' + (it.started_at ? '✓ 확인됨' : '확인 대기') + '</span>' : '') +
-            (decided ? '<span class="who2">' + (it.status === 'approved' ? '승인됨' : '반려됨') + '</span>' : '') +
-            (it.status === 'waiting' ? '<span class="who2">대기</span>' : '') +
-            '</label>' +
-            '<button class="btn-mini ghost" data-goto="' + roomForItem(it.title, it.assignee) + '" data-who="' + esc(it.assignee || '') + '">방으로 가기</button></div>';
-        });
-        gh += '</div>';
-      });
-    }
-    $('checklistGroups').innerHTML = gh;
   }
   function handleDetailClick(e){
     var dt = e.target.closest('[data-detail]');
@@ -1223,11 +1159,6 @@
     }
     handleDetailClick(e);
   });
-  $('checklistGroups').addEventListener('change', function(e){
-    var cb = e.target.closest('[data-check]');
-    if (!cb) return;
-    patchItem(parseInt(cb.getAttribute('data-check'), 10), {status: cb.checked ? 'done' : 'todo'});
-  });
   function addItem(){
     var title = $('newItemTitle').value.trim();
     if (!title){ $('newItemTitle').focus(); return; }
@@ -1256,7 +1187,7 @@
     state.timer = setInterval(function(){
       if (document.hidden) return;
       tick++;
-      if (state.view === 'approval' || state.view === 'progress'){
+      if (state.view === 'progress'){
         if (tick % 5 === 0) loadChecklist().catch(function(){});
       } else {
         loadMessages(false);
@@ -1265,7 +1196,7 @@
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
       if (!document.hidden){
-        if (state.view === 'approval' || state.view === 'progress') loadChecklist();
+        if (state.view === 'progress') loadChecklist();
         else loadMessages(false);
       }
     });
