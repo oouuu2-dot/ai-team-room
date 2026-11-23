@@ -446,7 +446,7 @@ async function dailyReminder(env) {
   ).first();
   if (!hour || hour.h < 19) return;
   const counted = await env.DB.prepare(
-    "select count(*) as n from checklist where group_name = '매일' and status = 'todo'"
+    "select count(*) as n from checklist where group_name = '매일' and instr(title, '매일') > 0 and status = 'todo'"
   ).first();
   const n = (counted && counted.n) || 0;
   if (!n) return;
@@ -458,7 +458,7 @@ async function dailyReminder(env) {
   ).first();
   if (sent) return;
   const rows = await env.DB.prepare(
-    "select title from checklist where group_name = '매일' and status = 'todo' order by id asc limit 5"
+    "select title from checklist where group_name = '매일' and instr(title, '매일') > 0 and status = 'todo' order by id asc limit 5"
   ).all();
   const titles = (rows.results || []).map((r) => '- ' + r.title).join('\n');
   const more = n > 5 ? `\n외 ${n - 5}건` : '';
