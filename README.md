@@ -275,8 +275,6 @@ Pages Functions 요청 10만 건/일, D1 저장 5GB·읽기 500만 행/일, KV �
 
 ---
 
-## 라이선스
-
 ## 텔레그램 방 지정
 
 기존 영어 명령(`/blog`, `/threads`, `/store`, `/insta`, `/general`)과 함께
