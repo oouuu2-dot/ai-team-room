@@ -15,6 +15,7 @@ const AGENTS = {
   '클로드': { role: '블로그 원고 · 벤치마킹', color: '#ffa94d', emoji: '🦊' },
   'Gemini': { role: '빠른 리서치 · 상위노출 분석', color: '#2dd4bf', emoji: '🐰' },
   '코덱스': { role: '코드 · 자동화 · 회의실 개발', color: '#60a5fa', emoji: '🦈' },
+  '의장': { role: '회의 진행 · 역할 배정', color: '#8b5cf6', emoji: '🤖' },
 };
 
 // 방 목록은 D1 의 rooms 테이블이 기준입니다. (schema.sql 기본값: general / instagram / blog / store / later)
@@ -228,6 +229,74 @@ async function postMessage(env, slug, payload) {
   return { message: messages[0] };
 }
 
+
+// ---------- 의장 봇 (10분마다 방을 확인해 사회를 봅니다) ----------
+// Cloudflare Cron Trigger가 scheduled(event, env, ctx)를 10분마다 부릅니다.
+// 규칙: 최근 10분 안에 올라온 똑똑이님 메시지 중 답글이 아직 없는 것만 처리합니다.
+//       방마다 최대 1개, 같은 질문에는 이미 남긴 의장 메시지가 있으면 다시 안 남깁니다.
+//       의장 자신의 메시지에는 절대 반응하지 않습니다 (똑똑이님 메시지만 봅니다).
+const CHAIR_NAME = '의장';
+const DISCUSSION_NAMES = ['피클1', '피클2', '클로드', 'Gemini', '코덱스'];
+
+// 키워드로 담당 AI를 정합니다.
+function routeQuestion(content) {
+  const t = String(content || '');
+  if (/인스타|릴스|카드뉴스|숏츠|스레드|지비|하하|유닉/.test(t)) return '피클1';
+  if (/블로그|원고|카페|체험단|글쓰기/.test(t)) return '클로드';
+  if (/순위|분석|상위노출|노출|검색|데이터랩/.test(t)) return 'Gemini';
+  if (/코드|자동화|개발|회의실|디자인|버그|에러/.test(t)) return '코덱스';
+  return '뮤즈';
+}
+
+function questionSummary(content) {
+  const one = String(content || '').replace(/\s+/g, ' ').trim();
+  return one.length > 200 ? one.slice(0, 200) + '…' : one;
+}
+
+async function runChair(env) {
+  const rooms = await roomList(env);
+  for (const room of rooms) {
+    // 최근 10분 안의 똑똑이님 메시지 (오래된 순)
+    const res = await env.DB.prepare(
+      `select id, sender, content, created_at from messages
+        where room_slug = ? and sender = '똑똑이'
+          and datetime(created_at) >= datetime('now', '-10 minutes')
+        order by id asc limit 20`
+    ).bind(room.slug).all();
+    const questions = res.results || [];
+    for (const q of questions) {
+      // 이미 답글이 달렸으면 패스
+      const replied = await env.DB.prepare(
+        'select id from messages where room_slug = ? and reply_to_id = ? limit 1'
+      ).bind(room.slug, q.id).first();
+      if (replied) continue;
+      // 이미 의장 메시지가 달렸으면 패스 (중복 방지)
+      const chaired = await env.DB.prepare(
+        "select id from messages where room_slug = ? and reply_to_id = ? and sender = '의장' limit 1"
+      ).bind(room.slug, q.id).first();
+      if (chaired) continue;
+
+      const isDiscussion = /의논|토론/.test(q.content || '');
+      let content;
+      if (isDiscussion) {
+        const order = DISCUSSION_NAMES.map((n) => '@' + n).join(' ');
+        content =
+          `${order} — 똑똑이님이 의논을 요청했어요. 아래 질문에 순서대로 의견을 달아주세요.\n` +
+          `질문: ${questionSummary(q.content)}\n` +
+          `각자 자기 역할 입장에서 짧게 의견 남기고, 마지막에 한 명이 정리해주세요.`;
+      } else {
+        const assignee = routeQuestion(q.content);
+        content =
+          `@${assignee}, 똑똑이님 질문에 답해주세요.\n` +
+          `질문: ${questionSummary(q.content)}`;
+      }
+      // 기존 메시지 저장 로직을 그대로 재사용합니다.
+      await postMessage(env, room.slug, { sender: CHAIR_NAME, content, reply_to_id: q.id });
+      break; // 한 번 실행에 방마다 최대 1개
+    }
+  }
+}
+
 const DOCS_TEMPLATE = `# AI 팀 회의실 API 사용법
 
 사람 1명과 여러 AI 에이전트가 한 화면의 방(Room)별로 대화하는 경량 회의실입니다.
@@ -424,6 +493,11 @@ async function handleApi(request, env, url) {
 }
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      runChair(env).catch((err) => console.error('[chair]', err && err.message ? err.message : err))
+    );
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
