@@ -277,6 +277,16 @@
       </div>
     </div>
 
+    <div class="approval" id="progressView">
+      <div class="appr-wrap">
+        <section class="appr-sec">
+          <h2>진행 상황 <span class="appr-count" id="progressCount">0건 진행 중</span></h2>
+          <p class="appr-desc">스레드·릴스·카드뉴스가 어디까지 진행됐는지 한눈에 봐요. 체크리스트에서 자동으로 모아요.</p>
+          <div id="progressBoards"></div>
+        </section>
+      </div>
+    </div>
+
     <div class="composer" id="composer">
       <div class="replybar" id="replyBar" hidden>
         <span>답글 →</span><b id="replyWho"></b><span id="replySnippet" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
@@ -501,6 +511,13 @@
       '<span class="rdesc" style="display:block">할 일·지시 체크 · 승인</span></span>' +
       '<span class="cnt" id="approvalBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
       '</button>';
+    var trackN = (state.items || []).filter(function(i){ return i.status === 'todo' && trackOf(i.title); }).length;
+    html += '<button class="room' + (state.view === 'progress' ? ' active' : '') + '" id="progressBtn">' +
+      '<span class="hash">📊</span>' +
+      '<span style="min-width:0"><span class="rname">진행 상황</span>' +
+      '<span class="rdesc" style="display:block">스레드·릴스·카드뉴스 진행</span></span>' +
+      '<span class="cnt" id="progressBadge"' + (trackN ? '' : ' style="display:none"') + '>' + trackN + '</span>' +
+      '</button>';
     elRoomList.innerHTML = html;
     Array.prototype.forEach.call(elRoomList.querySelectorAll('.room'), function(btn){
       btn.addEventListener('click', function(){
@@ -509,6 +526,8 @@
     });
     var ab = elRoomList.querySelector('#approvalBtn');
     if (ab) ab.addEventListener('click', showApproval);
+    var pb = elRoomList.querySelector('#progressBtn');
+    if (pb) pb.addEventListener('click', showProgress);
   }
   function loadRooms(){
     return api('/api/rooms').then(function(d){
@@ -794,11 +813,74 @@
   function groupLabel(g){
     return '[' + (g || '오늘') + ']';
   }
+  /* ---------- 진행 상황 ---------- */
+  var TRACKS = [
+    {key:'threads', name:'스레드', re:/스레드/},
+    {key:'reels', name:'릴스', re:/릴스|숏츠/},
+    {key:'cardnews', name:'카드뉴스', re:/카드뉴스|카뉴/}
+  ];
+  function trackOf(title){
+    var t = String(title || '');
+    for (var i = 0; i < TRACKS.length; i++){ if (TRACKS[i].re.test(t)) return TRACKS[i]; }
+    return null;
+  }
+  function statusLabel(s){
+    if (s === 'todo') return '진행 중';
+    if (s === 'done') return '완료·확인 대기';
+    if (s === 'approved') return '승인됨';
+    if (s === 'rejected') return '반려됨';
+    return s;
+  }
+  function showProgress(){
+    state.view = 'progress';
+    document.body.classList.remove('nav-open');
+    elMessages.style.display = 'none';
+    elComposer.style.display = 'none';
+    elApproval.classList.remove('show');
+    $('progressView').classList.add('show');
+    $('roomName').textContent = '진행 상황';
+    $('roomDesc').textContent = '스레드·릴스·카드뉴스 진행 상황';
+    renderRooms();
+    loadChecklist();
+  }
+  function renderProgress(){
+    var items = state.items || [];
+    var byTrack = {};
+    TRACKS.forEach(function(tr){ byTrack[tr.key] = []; });
+    items.forEach(function(it){
+      var tr = trackOf(it.title);
+      if (tr) byTrack[tr.key].push(it);
+    });
+    var inProg = items.filter(function(i){ return i.status === 'todo' && trackOf(i.title); }).length;
+    $('progressCount').textContent = inProg + '건 진행 중';
+    var badge = $('progressBadge');
+    if (badge){ badge.style.display = inProg ? '' : 'none'; badge.textContent = inProg; }
+    var h = '';
+    TRACKS.forEach(function(tr){
+      var list = byTrack[tr.key];
+      var todo = list.filter(function(i){ return i.status === 'todo'; }).length;
+      var done = list.filter(function(i){ return i.status === 'done'; }).length;
+      var ok = list.filter(function(i){ return i.status === 'approved'; }).length;
+      h += '<div class="grp"><h3><span class="tag">' + esc(tr.name) + '</span> · 진행 중 ' + todo + ' · 완료 대기 ' + done + ' · 승인됨 ' + ok + '</h3>';
+      if (!list.length){
+        h += '<div class="empty" style="margin:12px auto">아직 항목이 없어요.</div>';
+      } else {
+        list.forEach(function(it){
+          h += '<div class="appr-item"><div class="t">' + esc(it.title) + '</div>' +
+            '<div class="meta2">' + esc(statusLabel(it.status)) + ' ' + esc(groupLabel(it.group_name)) +
+            (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + '</div></div>';
+        });
+      }
+      h += '</div>';
+    });
+    $('progressBoards').innerHTML = h;
+  }
   function showApproval(){
     state.view = 'approval';
     document.body.classList.remove('nav-open');
     elMessages.style.display = 'none';
     elComposer.style.display = 'none';
+    $('progressView').classList.remove('show');
     elApproval.classList.add('show');
     $('roomName').textContent = '결재';
     $('roomDesc').textContent = '완료된 일 승인 · 할 일·지시 체크';
@@ -810,6 +892,7 @@
     elMessages.style.display = '';
     elComposer.style.display = '';
     elApproval.classList.remove('show');
+    $('progressView').classList.remove('show');
     var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
     if (cur){
       $('roomName').textContent = cur.slug;
@@ -820,6 +903,7 @@
     return api('/api/checklist').then(function(d){
       state.items = d.items || [];
       renderApproval();
+      renderProgress();
     }).catch(function(err){
       if (err.status === 401){
         if (state.timer){ clearInterval(state.timer); state.timer = null; }
@@ -934,7 +1018,7 @@
     state.timer = setInterval(function(){
       if (document.hidden) return;
       tick++;
-      if (state.view === 'approval'){
+      if (state.view === 'approval' || state.view === 'progress'){
         if (tick % 5 === 0) loadChecklist().catch(function(){});
       } else {
         loadMessages(false);
@@ -943,7 +1027,7 @@
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
       if (!document.hidden){
-        if (state.view === 'approval') loadChecklist();
+        if (state.view === 'approval' || state.view === 'progress') loadChecklist();
         else loadMessages(false);
       }
     });
