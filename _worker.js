@@ -280,13 +280,14 @@ async function ensureTelegram(env) {
 }
 
 function telegramEligible(row) {
-  return row.room_slug === 'to-me' || row.room_slug === 'pickles' || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
+  return row.room_slug === 'to-me' || String(row.content || '').includes('@똑똑이');
 }
 
 function telegramSummary(roomName, row) {
-  const lines = String(row.content || '').split(/\r?\n/);
-  const text = `[${roomName}] ${String(row.sender || '').trim()}: ${lines.slice(0, 3).join('\n')}`;
-  return text.length > 1000 ? text.slice(0, 999) + '…' : text + (lines.length > 3 ? '…' : '');
+  const text = `[${roomName}] ${String(row.sender || '').trim()}: ${String(row.content || '')}`;
+  const clipped = text.slice(0, 4096);
+  // Do not send half of a UTF-16 surrogate pair at the message boundary.
+  return /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
 }
 
 async function queueTelegram(env, row) {
@@ -309,9 +310,17 @@ async function flushTelegram(env) {
       .bind(row.message_id).run();
     if (!claim.meta?.changes) continue;
     try {
+      const original = await env.DB.prepare('select * from messages where id = ?').bind(row.message_id).first();
+      // Recheck old queued notifications against the current filter before sending.
+      if (!original || !telegramEligible(original)) {
+        await env.DB.prepare('delete from telegram_outbox where message_id = ?').bind(row.message_id).run();
+        continue;
+      }
+      const room = await getRoom(env, original.room_slug);
+      const body = telegramSummary(room ? room.name : original.room_slug, original);
       const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: row.text }),
+        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: body }),
         signal: AbortSignal.timeout(15000),
       });
       const result = await response.json();

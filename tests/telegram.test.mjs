@@ -83,20 +83,23 @@ test('webhook authenticates group and person, deduplicates and never echoes', as
   assert.equal(f.db.prepare('select count(*) n from telegram_outbox').get().n, 0);
   f.db.close();
 });
-test('only requested reports are queued and delivered once with three lines', async () => {
+test('only to-me and owner mentions are delivered, preserving the full body', async () => {
   const f = fixture();
   for (const [room, content] of [['general','평범한 글'], ['to-me','질문'], ['blog','@똑똑이 확인'], ['general','[피클 브리핑] 오늘'], ['store','작업 완료\n둘\n셋\n넷']])
     await f.api.postMessage(f.env, room, { sender: '코덱스', content });
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
-  assert.equal(f.sent.length, 4);
+  assert.equal(f.sent.length, 2);
   assert.equal(f.sent[0].text, '[똑똑이에게 온 채팅] 코덱스: 질문');
-  assert.equal(f.sent[3].text, '[스마트스토어] 코덱스: 작업 완료\n둘\n셋…');
-  assert.ok(f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(4000) }).length <= 1000);
+  assert.equal(f.sent[1].text, '[블로그] 코덱스: @똑똑이 확인');
+  const full = '첫 줄\n\n두 번째\n세 번째\n네 번째';
+  assert.equal(f.api.telegramSummary('종합',{sender:'코덱스',content:full}), '[종합] 코덱스: '+full);
+  const long = f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(5000) });
+  assert.equal(long.length,4096); assert.ok(!long.endsWith('…')); assert.ok(!long.endsWith('...'));
   f.db.close();
 });
 test('failed deliveries remain queued for cron retry', async () => {
   const f = fixture(); f.env.fail = true;
-  await f.api.postMessage(f.env, 'general', { sender: '코덱스', content: '완료' });
+  await f.api.postMessage(f.env, 'general', { sender: '코덱스', content: '@똑똑이 완료' });
   await f.api.flushTelegram(f.env);
   assert.equal(f.db.prepare('select sent_at from telegram_outbox').get().sent_at, null);
   f.env.fail = false; f.db.exec('update telegram_outbox set lease_until = null');
@@ -111,7 +114,7 @@ test('Telegram questions are picked up by the existing chair rules', async () =>
   f.db.close();
 });
 
-test('Pickle room commands, ordinary discussion notifications, and no inbound echo', async () => {
+test('Pickle commands route but only owner-directed discussion is notified', async () => {
   const f = fixture();
   f.db.exec("delete from rooms where slug='pickles'");
   for (const prefix of ['/pickles ', '/피클 ', '/피클토론 ', '피클:', '피클토론:']) {
@@ -124,9 +127,22 @@ test('Pickle room commands, ordinary discussion notifications, and no inbound ec
   assert.equal(f.db.prepare('select count(*) n from telegram_outbox').get().n,0);
   await f.api.postMessage(f.env,'pickles',{sender:'피클1',content:'첫 의견입니다'});
   await f.api.postMessage(f.env,'pickles',{sender:'피클2',content:'두 번째 의견입니다'});
+  await f.api.postMessage(f.env,'pickles',{sender:'피클2',content:'@똑똑이 최종 의견입니다'});
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
-  assert.equal(f.sent.length,2);
-  assert.match(f.sent[0].text,/피클 토론방.*피클1/);
-  assert.match(f.sent[1].text,/피클 토론방.*피클2/);
+  assert.equal(f.sent.length,1);
+  assert.match(f.sent[0].text,/피클 토론방.*피클2.*@똑똑이/);
+  f.db.close();
+});
+
+test('old queued messages are filtered again and eligible old previews use the full original', async () => {
+  const f=fixture();
+  await f.api.postMessage(f.env,'general',{sender:'코덱스',content:'그냥 완료'});
+  await f.api.postMessage(f.env,'general',{sender:'코덱스',content:'@똑똑이 하나\n둘\n셋\n넷'});
+  f.db.prepare('insert into telegram_outbox(message_id,text) values(1,?)').run('이전 완료 알림');
+  f.db.exec("update telegram_outbox set text='이전 잘린 요약…' where message_id=2");
+  await f.api.flushTelegram(f.env);
+  assert.equal(f.sent.length,1);
+  assert.equal(f.sent[0].text,'[종합] 코덱스: @똑똑이 하나\n둘\n셋\n넷');
+  assert.equal(f.db.prepare('select count(*) n from telegram_outbox where message_id=1').get().n,0);
   f.db.close();
 });
