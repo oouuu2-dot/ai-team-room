@@ -123,7 +123,23 @@ async function attachReplies(env, messages, slug) {
   return messages;
 }
 
+// 방 목록을 읽기 전에, 없을 수 있는 두 방(지시방·똑똑이에게 온 채팅)을 먼저 만들어 둡니다.
+// INSERT OR IGNORE라 이미 있으면 아무 일도 안 생깁니다. D1 콘솔을 따로 거칠 필요가 없습니다.
+async function ensureRooms(env) {
+  try {
+    await env.DB.prepare(
+      `insert or ignore into rooms (slug, name, description, position) values ('to-me', '똑똑이에게 온 채팅', 'AI들이 똑똑이님께 물어볼 때 쓰는 방', 6)`
+    ).run();
+    await env.DB.prepare(
+      `insert or ignore into rooms (slug, name, description, position) values ('orders', '지시방', '똑똑이님이 지시를 올리는 방 · AI들이 역할 나눠서 실행', 7)`
+    ).run();
+  } catch (e) {
+    // rooms 테이블이 아직 없으면 아래 SELECT가 기존처럼 에러를 냅니다.
+  }
+}
+
 async function roomList(env) {
+  await ensureRooms(env);
   const res = await env.DB.prepare(
     `select r.slug, r.name, r.description, r.position,
             (select count(*) from messages m where m.room_slug = r.slug) as message_count,
