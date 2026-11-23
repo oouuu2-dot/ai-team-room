@@ -185,6 +185,10 @@
   .appr-detail input,.appr-detail textarea{width:100%;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;margin-top:8px;outline:none}
   .appr-detail textarea{min-height:64px;resize:vertical}
   .appr-detail .save-note{margin-top:8px;background:var(--accent);border:0;border-radius:8px;color:#fff;font-weight:700;padding:7px 14px;font-size:12.5px;cursor:pointer}
+  .pbar{height:6px;background:#f0eef0;border-radius:99px;margin-top:8px;overflow:hidden}
+  .pbar .pfill{height:100%;background:var(--accent);border-radius:99px}
+  .act{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .appr-detail input.pct{width:64px;display:inline-block;margin-top:0;padding:4px 8px}
   .grp{margin-bottom:16px}
   .grp h3{margin:0 0 8px;font-size:13.5px;color:#374151}
   .grp h3 .tag{color:#c22e5f;font-weight:700}
@@ -867,7 +871,7 @@
     if (badge){ badge.style.display = inProg ? '' : 'none'; badge.textContent = inProg; }
     var h = '';
     TRACKS.forEach(function(tr){
-      var list = byTrack[tr.key];
+      var list = sortItems(byTrack[tr.key]);
       var todo = list.filter(function(i){ return i.status === 'todo'; }).length;
       var done = list.filter(function(i){ return i.status === 'done'; }).length;
       var ok = list.filter(function(i){ return i.status === 'approved'; }).length;
@@ -876,9 +880,12 @@
         h += '<div class="empty" style="margin:12px auto">아직 항목이 없어요.</div>';
       } else {
         list.forEach(function(it){
+          var pct = pctOf(it);
           h += '<div class="appr-item"><div class="t">' + esc(it.title) + '</div>' +
             '<div class="meta2">' + esc(statusLabel(it.status)) + ' ' + esc(groupLabel(it.group_name)) +
-            (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + '</div></div>';
+            (it.assignee ? ' · 담당 ' + esc(it.assignee) : '') + '</div>' +
+            '<div class="act">시작 ' + (it.started_at ? fmtTime(it.started_at) : '아직 시작 안 함') + ' · 마지막 활동 ' + (it.last_activity_at ? fmtTime(it.last_activity_at) : '-') + ' · ' + pct + '%</div>' +
+            '<div class="pbar"><div class="pfill" style="width:' + pct + '%"></div></div></div>';
         });
       }
       h += '</div>';
@@ -928,6 +935,29 @@
     return api('/api/checklist/' + id, {method:'PATCH', body: JSON.stringify(body)})
       .then(function(){ return loadChecklist(); });
   }
+  function kstParts(iso){
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    var p = new Intl.DateTimeFormat('ko-KR', {timeZone:'Asia/Seoul', year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false}).formatToParts(d);
+    var o = {};
+    p.forEach(function(x){ o[x.type] = x.value; });
+    return o;
+  }
+  function fmtTime(iso){
+    var o = kstParts(iso); if (!o) return '';
+    var n = kstParts(new Date().toISOString()); if (!n) return o.hour + ':' + o.minute;
+    var hm = o.hour + ':' + o.minute;
+    if (o.year === n.year && o.month === n.month && o.day === n.day) return hm;
+    return o.month + '/' + o.day + ' ' + hm;
+  }
+  function pctOf(it){ return Math.max(0, Math.min(100, parseInt(it.progress, 10) || 0)); }
+  function statusRank(s){ return s === 'todo' ? 0 : s === 'done' ? 1 : s === 'approved' ? 2 : s === 'rejected' ? 3 : 9; }
+  function sortItems(list){
+    return list.slice().sort(function(a, b){
+      var r = statusRank(a.status) - statusRank(b.status);
+      return r !== 0 ? r : b.id - a.id;
+    });
+  }
   function isHttpUrl(u){ return /^https?:\/\//i.test(u || ''); }
   function detailHtml(it, noteVal, linkVal){
     var h = '';
@@ -938,6 +968,7 @@
       (it.source ? ' · ' + esc(it.source) : '') +
       (it.created_at ? ' · 등록 ' + esc(String(it.created_at).slice(0, 10)) : '') +
       (it.reason ? ' · 반려 사유: ' + esc(it.reason) : '') + '</div>';
+    h += '<div class="dmeta">진행률 <input class="pct" type="number" min="0" max="100" data-progress="' + it.id + '" value="' + pctOf(it) + '"> % · 시작 ' + (it.started_at ? fmtTime(it.started_at) : '아직 시작 안 함') + ' · 마지막 활동 ' + (it.last_activity_at ? fmtTime(it.last_activity_at) : '-') + '</div>';
     h += '<textarea data-note="' + it.id + '" placeholder="내용 메모를 입력하세요">' + esc(noteVal !== undefined ? noteVal : (it.detail || '')) + '</textarea>' +
       '<input data-link="' + it.id + '" placeholder="관련 링크 (https://…)" value="' + esc(linkVal !== undefined ? linkVal : (it.link || '')) + '">' +
       '<button class="save-note" data-save-note="' + it.id + '">메모 저장</button>';
@@ -986,7 +1017,7 @@
     } else {
       groups.forEach(function(g){
         gh += '<div class="grp"><h3><span class="tag">' + esc(groupLabel(g)) + '</span></h3>';
-        byGroup[g].forEach(function(it){
+        sortItems(byGroup[g]).forEach(function(it){
           var done = it.status === 'done';
           var decided = it.status === 'approved' || it.status === 'rejected';
           gh += '<label class="chk' + (done ? ' done' : '') + '">' +
@@ -1042,7 +1073,9 @@
       var linkEl = document.querySelector('[data-link="' + sid + '"]');
       var sitem = (state.items || []).filter(function(x){ return x.id === sid; })[0];
       if (sitem){
-        patchItem(sid, {status: sitem.status, detail: noteEl ? noteEl.value : '', link: linkEl ? linkEl.value : ''});
+        var pctEl = document.querySelector('[data-progress="' + sid + '"]');
+        var pct = pctEl ? Math.max(0, Math.min(100, parseInt(pctEl.value, 10) || 0)) : pctOf(sitem);
+        patchItem(sid, {status: sitem.status, detail: noteEl ? noteEl.value : '', link: linkEl ? linkEl.value : '', progress: pct});
       }
       return;
     }

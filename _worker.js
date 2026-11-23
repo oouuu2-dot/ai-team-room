@@ -276,6 +276,7 @@ async function ensureChecklistTable(env) {
   // 내용(detail)·링크(link) 컬럼 추가 (이미 있으면 무시)
   try { await env.DB.prepare(`alter table checklist add column detail text`).run(); } catch (e) {}
   try { await env.DB.prepare(`alter table checklist add column link text`).run(); } catch (e) {}
+  try { await env.DB.prepare(`alter table checklist add column progress integer not null default 0`).run(); } catch (e) {}
 }
 
 function checklistRow(row) {
@@ -289,6 +290,9 @@ function checklistRow(row) {
     reason: row.reason || '',
     detail: row.detail || '',
     link: row.link || '',
+    progress: Math.max(0, Math.min(100, parseInt(row.progress, 10) || 0)),
+    started_at: row.started_at || '',
+    last_activity_at: row.last_activity_at || '',
     created_at: row.created_at,
   };
 }
@@ -296,7 +300,10 @@ function checklistRow(row) {
 async function listChecklist(env) {
   await ensureChecklistTable(env);
   const res = await env.DB.prepare(
-    'select id, title, group_name, assignee, status, source, reason, detail, link, created_at from checklist order by group_name, id'
+    `select c.id, c.title, c.group_name, c.assignee, c.status, c.source, c.reason, c.detail, c.link, c.progress, c.created_at,
+            (select min(m.created_at) from messages m where m.sender = c.assignee and m.created_at > c.created_at) as started_at,
+            (select max(m.created_at) from messages m where m.sender = c.assignee) as last_activity_at
+       from checklist c order by group_name, id`
   ).all();
   return (res.results || []).map(checklistRow);
 }
@@ -630,8 +637,10 @@ async function handleApi(request, env, url) {
       const reason = payload && payload.reason !== undefined ? String(payload.reason).trim().slice(0, 500) : (existing.reason || '');
       const detail = payload && payload.detail !== undefined ? String(payload.detail).trim().slice(0, 2000) : (existing.detail || '');
       const link = payload && payload.link !== undefined ? String(payload.link).trim().slice(0, 500) : (existing.link || '');
-      await env.DB.prepare('update checklist set status = ?, reason = ?, detail = ?, link = ? where id = ?')
-        .bind(status, reason || null, detail || null, link || null, id)
+      const progress = payload && payload.progress !== undefined && payload.progress !== null && String(payload.progress).trim() !== ''
+        ? Math.max(0, Math.min(100, parseInt(payload.progress, 10) || 0)) : (parseInt(existing.progress, 10) || 0);
+      await env.DB.prepare('update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ? where id = ?')
+        .bind(status, reason || null, detail || null, link || null, progress, id)
         .run();
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
       return json({ ok: true, item: checklistRow(row) });
