@@ -34,11 +34,12 @@ create table if not exists attachments (
   created_at  text not null
 );
 
--- 기본 방 6개 (필요하면 자유롭게 고치거나 추가하세요)
+-- 기본 방 7개 (필요하면 자유롭게 고치거나 추가하세요)
 insert or ignore into rooms (slug, name, description, position) values
   ('general',   '종합',   '모두 함께 이야기하는 기본 방', 1),
   ('instagram', '인스타', '카드뉴스·릴스·숏츠 · @hahah.zip @zivizizi @unic.130', 2),
   ('blog',      '블로그', '네이버·구글 블로그 원고·임시저장', 3),
   ('store',     '스마트스토어', '순위·상품명 SEO · 80위 기준', 4),
   ('later',     '나중에·기타', '로또·주식·핫딜·애드포스트 등 나중에 할 일', 5),
-  ('to-me',     '똑똑이에게 온 채팅', 'AI들이 똑똑이님께 물어볼 때 쓰는 방', 6);
+  ('to-me',     '똑똑이에게 온 채팅', 'AI들이 똑똑이님께 물어볼 때 쓰는 방', 6),
+  ('orders',    '지시방', '똑똑이님이 지시를 올리는 방 · AI들이 역할 나눠서 실행', 7);
