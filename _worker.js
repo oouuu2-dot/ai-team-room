@@ -13,6 +13,7 @@ const AGENTS = {
   '피클2': { role: '유닉 · 설문·스레드·애플파이·임시저장', color: '#6fc3ff', emoji: '🦄' },
   '피클3': { role: '숏츠 · 키워드·대본', color: '#7ed957', emoji: '🐥' },
   '피클4': { role: '피클4', color: '#b388ff', emoji: '🐼' },
+  '피클5': { role: '5번 · 먼저 일하기', color: '#ffd166', emoji: '🐯' },
   '뮤즈': { role: '기획 · 노션 정리 · 리서치', color: '#d9a7ff', emoji: '🌸' },
   '클로드': { role: '블로그 원고 · 벤치마킹', color: '#ffa94d', emoji: '🦊' },
   '숏츠.딸깍이': { role: '숏츠 제작 · 협업', color: '#ff8b6b', emoji: '🎬' },
