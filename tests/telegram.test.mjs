@@ -28,10 +28,10 @@ function fixture() {
     } });
   return { db, env, api, sent };
 }
-function webhook(f, text, { id = 10, user = 42, chat = -123, secret = 'test-secret' } = {}) {
+function webhook(f, text, { id = 10, user = 42, chat = -123, secret = 'test-secret', reply } = {}) {
   return f.api.telegramWebhook(new Request('https://room/telegram/webhook', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': secret },
-    body: JSON.stringify({ update_id: id, message: { from: { id: user }, chat: { id: chat }, text } }),
+    body: JSON.stringify({ update_id: id, message: { from: { id: user }, chat: { id: chat }, text, reply_to_message: reply } }),
   }), f.env);
 }
 test('all room commands route, ordinary text defaults to orders', () => {
@@ -158,5 +158,18 @@ test('folded HTML escapes user text and keeps Unicode message boundaries valid',
   const visible=long.replace(/<[^>]*>/g,'');
   assert.ok(visible.length<=4096);
   assert.ok(!/[\uD800-\uDBFF]$/.test(visible));
+  f.db.close();
+});
+
+test('Telegram Reply message bodies reach orders without copying the quoted command', async () => {
+  const f=fixture();
+  const text='이거 보여줘 어디있어 링크';
+  await webhook(f,text,{id:300,reply:{message_id:20,text:'/blog 이전 메시지'}});
+  const row=f.db.prepare('select room_slug,content,reply_to_id from messages').get();
+  assert.equal(row.room_slug,'orders'); assert.equal(row.content,text);
+  // Telegram message IDs are not room message IDs and must not be guessed.
+  assert.equal(row.reply_to_id,null);
+  await webhook(f,text,{id:300,reply:{message_id:20,text:'/blog 이전 메시지'}});
+  assert.equal(f.db.prepare('select count(*) n from messages').get().n,1);
   f.db.close();
 });
