@@ -108,3 +108,21 @@ test('mixed card reports do not mark the unfinished card complete', async () => 
   assert.equal(f.db.prepare('select status from checklist where id=36').get().status,'todo');
   f.db.close();
 });
+
+test('shorts room is created idempotently, accepts its named sender and routes questions', async () => {
+  const f=await setup();
+  f.db.exec("delete from rooms where slug='shorts'");
+  for(let i=0;i<2;i++) {
+    const request=new Request('https://room.test/api/rooms',{headers:{Authorization:'Bearer test'}});
+    const response=await f.api.handleApi(request,f.env,new URL(request.url));
+    const data=await response.json();
+    assert.equal(data.rooms.filter(room=>room.slug==='shorts').length,1);
+    assert.equal(data.rooms.find(room=>room.slug==='shorts').name,'숏츠');
+  }
+  const posted=await f.api.postMessage(f.env,'shorts',{sender:'숏츠.딸깍이',content:'제작 준비'});
+  assert.equal(posted.message.sender,'숏츠.딸깍이');
+  assert.equal(posted.message.role,'숏츠 제작 · 협업');
+  assert.equal(f.api.routeQuestion('어떻게 만들까요?','shorts'),'숏츠.딸깍이');
+  assert.equal(f.api.routeQuestion('@숏츠.딸깍이 어떻게?','general'),'숏츠.딸깍이');
+  f.db.close();
+});

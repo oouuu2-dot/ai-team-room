@@ -15,6 +15,7 @@ const AGENTS = {
   '피클4': { role: '피클4', color: '#b388ff', emoji: '🐼' },
   '뮤즈': { role: '기획 · 노션 정리 · 리서치', color: '#d9a7ff', emoji: '🌸' },
   '클로드': { role: '블로그 원고 · 벤치마킹', color: '#ffa94d', emoji: '🦊' },
+  '숏츠.딸깍이': { role: '숏츠 제작 · 협업', color: '#ff8b6b', emoji: '🎬' },
   'Gemini': { role: '빠른 리서치 · 상위노출 분석', color: '#2dd4bf', emoji: '🐰' },
   '코덱스': { role: '코드 · 자동화 · 회의실 개발', color: '#60a5fa', emoji: '🦈' },
   '의장': { role: '회의 진행 · 역할 배정', color: '#8b5cf6', emoji: '🤖' },
@@ -28,7 +29,7 @@ function canonicalAgent(value) {
   return AGENT_ALIASES[name.toLowerCase()] || name;
 }
 function normalizeMentions(content) {
-  return String(content || '').replace(/(^|[\s(])@([가-힣A-Za-z0-9_~]+)/g,
+  return String(content || '').replace(/(^|[\s(])@(숏츠\.딸깍이|[가-힣A-Za-z0-9_~]+)/g,
     (_all, prefix, name) => prefix + '@' + canonicalAgent(name));
 }
 
@@ -149,6 +150,9 @@ async function ensureRooms(env) {
     ).run();
     await env.DB.prepare(
       `insert or ignore into rooms (slug, name, description, position) values ('threads', '스레드', '스레드 분석·벤치마킹·발행 준비', 8)`
+    ).run();
+    await env.DB.prepare(
+      `insert or ignore into rooms (slug, name, description, position) values ('shorts', '숏츠', '숏츠 제작·협업', 10)`
     ).run();
   } catch (e) {
     // rooms 테이블이 아직 없으면 아래 SELECT가 기존처럼 에러를 냅니다.
@@ -451,10 +455,10 @@ const CHAIR_NAME = '의장';
 // 키워드로 담당 AI를 정합니다.
 function routeQuestion(content, room = 'general') {
   const t = String(content || '');
-  const mentions = [...normalizeMentions(t).matchAll(/(?:^|[\s(])@([가-힣A-Za-z0-9_~]+)/g)];
+  const mentions = [...normalizeMentions(t).matchAll(/(?:^|[\s(])@(숏츠\.딸깍이|[가-힣A-Za-z0-9_~]+)/g)];
   const named = mentions.map((m) => canonicalAgent(m[1])).find((name) => AGENTS[name] && !['똑똑이', '의장'].includes(name));
   if (named) return named;
-  return ({ instagram: '피클1', threads: '피클2', blog: '클로드', store: 'Gemini' })[room] || '뮤즈';
+  return ({ instagram: '피클1', threads: '피클2', blog: '클로드', store: 'Gemini', shorts: '숏츠.딸깍이' })[room] || '뮤즈';
 }
 
 function isQuestion(content) {
@@ -518,6 +522,7 @@ async function sendAutomationOnce(env, key, room, payload) {
 // 할 일 제목·담당자로 그 일이 있는 방을 정합니다 (방으로 가기·재촉용).
 function roomForItem(title, assignee) {
   const t = String(title || '');
+  if (/숏츠/.test(t) || assignee === '숏츠.딸깍이') return 'shorts';
   if (/스레드|드레쓰/.test(t)) return 'threads';
   if (/카드뉴스|카뉴|릴스|숏츠|인스타/.test(t)) return 'instagram';
   if (/블로그|원고|전자책/.test(t)) return 'blog';

@@ -452,6 +452,7 @@
     {name:'피클4', emoji:'🐼', role:'피클4'},
     {name:'뮤즈', emoji:'🌸', role:'기획 · 노션 정리 · 리서치'},
     {name:'클로드', emoji:'🦊', role:'블로그 원고 · 벤치마킹'},
+    {name:'숏츠.딸깍이', emoji:'🎬', role:'숏츠 제작 · 협업'},
     {name:'Gemini', emoji:'🐰', role:'빠른 리서치 · 상위노출 분석'},
     {name:'코덱스', emoji:'🦈', role:'코드 · 자동화 · 회의실 개발'},
     {name:'의장', emoji:'🤖', role:'회의 진행 · 역할 배정'},
@@ -496,7 +497,7 @@
     s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
     s = s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
-    s = s.replace(/(^|[\s>])@([가-힣A-Za-z0-9_~]{1,20})/g, '$1<span class="mention">@$2</span>');
+    s = s.replace(/(^|[\s>])@(숏츠\.딸깍이|[가-힣A-Za-z0-9_~]{1,20})/g, '$1<span class="mention">@$2</span>');
     return s;
   }
   function renderMd(raw){
@@ -622,7 +623,7 @@
     state.rooms.forEach(function(r){
       var unread = (r.slug !== state.room) ? (r.unread || 0) : 0;
       var badge = unread ? '<span class="cnt">' + unread + '</span>' : '';
-      html += '<button class="room' + (r.slug === state.room ? ' active' : '') + (r.message_count ? '' : ' empty-room') + '" data-room="' + esc(r.slug) + '" title="' + esc(r.description || '') + '">' +
+      html += '<button class="room' + (r.slug === state.room ? ' active' : '') + (r.message_count || r.slug === 'shorts' ? '' : ' empty-room') + '" data-room="' + esc(r.slug) + '" title="' + esc(r.description || '') + '">' +
         '<span class="hash">#</span>' +
         '<span style="min-width:0"><span class="rname">' + esc(r.name) + '</span>' +
         '<span class="rdesc" style="display:block">' + esc(r.description || '') + '</span></span>' +
@@ -1015,6 +1016,7 @@
   }
   function roomForItem(title, assignee){
     var t = String(title || '');
+    if (/숏츠/.test(t) || assignee === '숏츠.딸깍이') return 'shorts';
     if (/스레드|드레쓰/.test(t)) return 'threads';
     if (/카드뉴스|카뉴|릴스|숏츠|인스타/.test(t)) return 'instagram';
     if (/블로그|원고|전자책/.test(t)) return 'blog';
