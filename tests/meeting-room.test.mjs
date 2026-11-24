@@ -23,6 +23,11 @@ function fixture() {
   return { db, env, api };
 }
 async function setup() { const f = fixture(); await f.api.ensureChecklistTable(f.env); return f; }
+async function checklistRequest(f, method, path, body) {
+  const request = new Request('https://room.test/api/checklist' + path, {method,headers:{Authorization:'Bearer test','Content-Type':'application/json'},...(body ? {body:JSON.stringify(body)} : {})});
+  const response = await f.api.handleApi(request,f.env,new URL(request.url));
+  return {status:response.status,data:await response.json()};
+}
 function item(f, id = 35, assignee = '코덱스') {
   f.db.prepare('insert into checklist (id,title,assignee,status,progress) values (?,?,?,\'todo\',0)').run(id, '특정 개발 작업', assignee);
 }
@@ -124,5 +129,40 @@ test('shorts room is created idempotently, accepts its named sender and routes q
   assert.equal(posted.message.role,'숏츠 제작 · 협업');
   assert.equal(f.api.routeQuestion('어떻게 만들까요?','shorts'),'숏츠.딸깍이');
   assert.equal(f.api.routeQuestion('@숏츠.딸깍이 어떻게?','general'),'숏츠.딸깍이');
+  f.db.close();
+});
+
+test('stage data round-trips and old checklist clients preserve it and approval state', async () => {
+  const f=await setup();
+  const stages=[{name:'리서치',assignee:'Gemini',progress:100},{name:'제작',assignee:'Claude',progress:null}];
+  const created=await checklistRequest(f,'POST','',{title:'숏츠 제작',stages});
+  assert.equal(created.status,201);
+  const id=created.data.item.id;
+  assert.equal(created.data.item.stages[1].assignee,'클로드');
+  assert.equal(created.data.item.stages[1].progress,null);
+  await checklistRequest(f,'PATCH','/'+id,{status:'approved',progress:43});
+  const saved=await checklistRequest(f,'PATCH','/'+id,{stages:[{name:'제작',assignee:'Codex',progress:50}]});
+  assert.equal(saved.data.item.status,'approved');
+  assert.equal(saved.data.item.progress,43);
+  assert.equal(saved.data.item.stages[0].assignee,'코덱스');
+  await checklistRequest(f,'PATCH','/'+id,{detail:'기존 메모 저장'});
+  const listed=await checklistRequest(f,'GET','');
+  assert.equal(listed.data.items[0].stages[0].progress,50);
+  await checklistRequest(f,'PATCH','/'+id,{status:'rejected',reason:'재검토'});
+  assert.equal(f.db.prepare('select stages from checklist where id=?').get(id).stages.includes('50'),true);
+  f.db.close();
+});
+
+test('invalid stages fail atomically and legacy rows keep unknown stages empty', async () => {
+  const f=await setup(); item(f);
+  for(const stages of [{},Array(13).fill({name:'a',assignee:'',progress:0}),[{name:'',progress:0}],[{name:'a',progress:101}],[{name:'a',progress:1.5}],[{name:'a',progress:'50'}]]) {
+    const result=await checklistRequest(f,'PATCH','/35',{status:'done',stages});
+    assert.equal(result.status,400);
+    assert.equal(f.db.prepare('select status from checklist where id=35').get().status,'todo');
+  }
+  const listed=await checklistRequest(f,'GET','');
+  assert.deepEqual(listed.data.items[0].stages,[]);
+  const cleared=await checklistRequest(f,'PATCH','/35',{stages:[]});
+  assert.deepEqual(cleared.data.item.stages,[]);
   f.db.close();
 });

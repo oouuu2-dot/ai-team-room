@@ -56,5 +56,6 @@ create table if not exists checklist (
   status     text not null default 'todo',
   source     text,
   reason     text,
+  stages     text,
   created_at text not null default (datetime('now'))
 );

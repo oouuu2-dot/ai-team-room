@@ -410,11 +410,29 @@ async function ensureChecklistTable(env) {
   try { await env.DB.prepare(`alter table checklist add column progress integer not null default 0`).run(); } catch (e) {}
   try { await env.DB.prepare(`alter table checklist add column updated_at text`).run(); } catch (e) {}
   try { await env.DB.prepare(`alter table checklist add column approved_at text`).run(); } catch (e) {}
+  try { await env.DB.prepare(`alter table checklist add column stages text`).run(); } catch (e) {}
   await env.DB.prepare(`create table if not exists automation_events (
     event_key text primary key, created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   )`).run();
 }
 
+function validateStages(stages) {
+  if (!Array.isArray(stages) || stages.length > 12) throw new Error('단계는 최대 12개까지 가능합니다.');
+  return stages.map(stage => {
+    if (!stage || typeof stage !== 'object' || typeof stage.name !== 'string' || !stage.name.trim() || stage.name.trim().length > 40) {
+      throw new Error('단계명은 1~40자로 입력하세요.');
+    }
+    if (stage.progress !== null && (typeof stage.progress !== 'number' || !Number.isInteger(stage.progress) || stage.progress < 0 || stage.progress > 100)) {
+      throw new Error('단계 진행률은 0~100 정수 또는 null(미보고)이어야 합니다.');
+    }
+    const assignee = canonicalAgent(stage.assignee || '');
+    if (assignee.length > 24) throw new Error('담당자는 24자까지 가능합니다.');
+    return { name: stage.name.trim(), assignee, progress: stage.progress };
+  });
+}
+function readStages(raw) {
+  try { return validateStages(JSON.parse(raw || '[]')); } catch { return []; }
+}
 function checklistRow(row) {
   return {
     id: row.id,
@@ -427,6 +445,7 @@ function checklistRow(row) {
     detail: row.detail || '',
     link: row.link || '',
     progress: Math.max(0, Math.min(100, parseInt(row.progress, 10) || 0)),
+    stages: readStages(row.stages),
     started_at: row.started_at || '',
     last_activity_at: row.last_activity_at || '',
     created_at: row.created_at,
@@ -436,7 +455,7 @@ function checklistRow(row) {
 async function listChecklist(env) {
   await ensureChecklistTable(env);
   const res = await env.DB.prepare(
-    `select c.id, c.title, c.group_name, c.assignee, c.status, c.source, c.reason, c.detail, c.link, c.progress, c.created_at,
+    `select c.id, c.title, c.group_name, c.assignee, c.status, c.source, c.reason, c.detail, c.link, c.progress, c.stages, c.created_at,
             (select min(m.created_at) from messages m where m.sender = c.assignee and m.created_at > c.created_at) as started_at,
             (select max(m.created_at) from messages m where m.sender = c.assignee) as last_activity_at
        from checklist c order by group_name, id`
@@ -720,7 +739,7 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 - GET /api/agents — 참여자 목록
 - GET /api/checklist — 결재·체크리스트 목록
 - POST /api/checklist — 체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)
-- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 담당자(assignee)·내용(detail)·링크(link) 수정 가능
+- PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 담당자(assignee)·내용(detail)·링크(link)·단계(stages) 수정 가능. stages: [{name, assignee, progress: 0~100 정수 또는 null(미보고)}], 최대 12개. 생략 시 보존, []로 초기화. 전체 진행률·결재와 독립.
 - GET /api/attachments/:id — 첨부 이미지/파일 조회 (인증 필요, ?key= 지원)
 - GET /api/docs?format=json — 이 안내의 JSON 버전
 - GET /api/health — 상태 확인(인증 불필요)
@@ -873,12 +892,15 @@ async function handleApi(request, env, url) {
       const source = String((payload && payload.source) || '').trim().slice(0, 40);
       const detail = String((payload && payload.detail) || '').trim().slice(0, 2000);
       const link = String((payload && payload.link) || '').trim().slice(0, 500);
+      let stages;
+      try { stages = validateStages(payload?.stages ?? []); }
+      catch (e) { return json({ ok: false, error: 'invalid_request', message: e.message }, 400); }
       await ensureChecklistTable(env);
       const res = await env.DB.prepare(
-        `insert into checklist (title, group_name, assignee, status, source, detail, link, created_at)
-         values (?, ?, ?, 'todo', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+        `insert into checklist (title, group_name, assignee, status, source, detail, link, stages, created_at)
+         values (?, ?, ?, 'todo', ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
       )
-        .bind(title, group, assignee || null, source || null, detail || null, link || null)
+        .bind(title, group, assignee || null, source || null, detail || null, link || null, JSON.stringify(stages))
         .run();
       const id = res.meta && res.meta.last_row_id;
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
@@ -908,8 +930,11 @@ async function handleApi(request, env, url) {
         ? Math.max(0, Math.min(100, parseInt(payload.progress, 10) || 0)) : (parseInt(existing.progress, 10) || 0);
       const assignee = canonicalAgent(payload && payload.assignee !== undefined ? payload.assignee : existing.assignee).slice(0, 24);
       const approvalTime = status === 'approved' && existing.status !== 'approved' ? new Date().toISOString() : existing.approved_at;
-      await env.DB.prepare("update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ?, assignee = ?, approved_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') where id = ?")
-        .bind(status, reason || null, detail || null, link || null, progress, assignee || null, approvalTime || null, id)
+      let stages = readStages(existing.stages);
+      try { if (payload && payload.stages !== undefined) stages = validateStages(payload.stages); }
+      catch (e) { return json({ ok: false, error: 'invalid_request', message: e.message }, 400); }
+      await env.DB.prepare("update checklist set status = ?, reason = ?, detail = ?, link = ?, progress = ?, assignee = ?, approved_at = ?, stages = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') where id = ?")
+        .bind(status, reason || null, detail || null, link || null, progress, assignee || null, approvalTime || null, JSON.stringify(stages), id)
         .run();
       const row = await env.DB.prepare('select * from checklist where id = ?').bind(id).first();
       return json({ ok: true, item: checklistRow(row) });
