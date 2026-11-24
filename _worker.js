@@ -11,6 +11,8 @@ const AGENTS = {
   '똑똑이': { role: '대표 · 최종 결정', color: '#ff6fa5', emoji: '👑' },
   '피클1': { role: '지비.하하 · 인스타 카드뉴스·릴스·예약', color: '#ff5c8a', emoji: '🦉' },
   '피클2': { role: '유닉 · 설문·스레드·애플파이·임시저장', color: '#6fc3ff', emoji: '🦄' },
+  '피클3': { role: '숏츠 · 키워드·대본', color: '#7ed957', emoji: '🐥' },
+  '피클4': { role: '피클4', color: '#b388ff', emoji: '🐼' },
   '뮤즈': { role: '기획 · 노션 정리 · 리서치', color: '#d9a7ff', emoji: '🌸' },
   '클로드': { role: '블로그 원고 · 벤치마킹', color: '#ffa94d', emoji: '🦊' },
   'Gemini': { role: '빠른 리서치 · 상위노출 분석', color: '#2dd4bf', emoji: '🐰' },
