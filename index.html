@@ -481,7 +481,7 @@
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;
   }
-  var POLL_MS = 4000;
+  var POLL_MS = 30000;
   var state = {
     key: localStorage.getItem('ai_team_room_key') || '',
     sender: normalizeSender(localStorage.getItem('ai_team_room_sender') || SENDERS[0].name),
