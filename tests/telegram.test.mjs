@@ -55,15 +55,15 @@ test('webhook authenticates group and person, deduplicates and never echoes', as
   assert.equal(f.db.prepare('select count(*) n from telegram_outbox').get().n, 0);
   f.db.close();
 });
-test('only requested reports are queued and delivered once with three lines', async () => {
+test('only requested reports are queued with full text and a room link', async () => {
   const f = fixture();
   for (const [room, content] of [['general','평범한 글'], ['to-me','질문'], ['blog','@똑똑이 확인'], ['general','[피클 브리핑] 오늘'], ['store','작업 완료\n둘\n셋\n넷']])
     await f.api.postMessage(f.env, room, { sender: '코덱스', content });
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
   assert.equal(f.sent.length, 4);
-  assert.equal(f.sent[0].text, '[똑똑이에게 온 채팅] 코덱스: 질문');
-  assert.equal(f.sent[3].text, '[스마트스토어] 코덱스: 작업 완료\n둘\n셋…');
-  assert.ok(f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(4000) }).length <= 1000);
+  assert.equal(f.sent[0].text, '[똑똑이에게 온 채팅] 코덱스: 질문\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=to-me');
+  assert.equal(f.sent[3].text, '[스마트스토어] 코덱스: 작업 완료\n둘\n셋\n넷\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=store');
+  assert.ok(f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(4000) }).length <= 4096);
   f.db.close();
 });
 test('failed deliveries remain queued for cron retry', async () => {
@@ -77,7 +77,8 @@ test('failed deliveries remain queued for cron retry', async () => {
 });
 test('Telegram questions are picked up by the existing chair rules', async () => {
   const f = fixture(); await webhook(f, '/blog 어떻게 작성하나요?');
-  // Existing chair checks questions in its configured time window.
+  // The chair waits ten minutes for an agent response before calling.
+  f.db.exec("update messages set created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-11 minutes')");
   await f.api.runChair(f.env);
   assert.ok(f.db.prepare("select id from messages where sender = '의장' and reply_to_id = 1").get());
   f.db.close();
