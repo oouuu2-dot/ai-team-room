@@ -281,9 +281,14 @@ function telegramEligible(row) {
 }
 
 function telegramSummary(roomName, row) {
-  const lines = String(row.content || '').split(/\r?\n/);
-  const text = `[${roomName}] ${String(row.sender || '').trim()}: ${lines.slice(0, 3).join('\n')}`;
-  return text.length > 1000 ? text.slice(0, 999) + '…' : text + (lines.length > 3 ? '…' : '');
+  const content = String(row.content || '').trim();
+  const prefix = `[${roomName}] ${String(row.sender || '').trim()}: `;
+  const roomUrl = `\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=${encodeURIComponent(row.room_slug || 'general')}`;
+  // Telegram sendMessage limit is 4096 chars; keep a margin for prefix + room link.
+  // Send the full text (no 3-line cut) so Telegram's own "read more" expands it on tap.
+  const maxBody = 4000 - prefix.length - roomUrl.length;
+  const body = content.length > maxBody ? content.slice(0, Math.max(0, maxBody)) + '…' : content;
+  return prefix + body + roomUrl;
 }
 
 async function queueTelegram(env, row) {
