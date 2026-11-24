@@ -25,7 +25,7 @@ MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 LOOKBACK_SECONDS = 15 * 60
 MAX_REPLIES_PER_RUN = 3
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
-CALL_WORDS = ["@gemini", "gemini", "재미니", "재미나", "[gemini]"]
+CALL_WORDS = ["@gemini", "gemini", "재미니", "재미나", "재미", "[gemini]"]
 
 SYSTEM = (
     "너는 AI 팀 회의실의 'Gemini'(재미니)야. 빠른 리서치·상위노출 분석 담당이야. "
