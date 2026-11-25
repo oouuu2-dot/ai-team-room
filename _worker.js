@@ -303,14 +303,19 @@ async function ensureTelegram(env) {
     lease_until text, attempts integer not null default 0)` ).run();
 }
 
+function ownerActionMessage(row) {
+  return row.room_slug === 'to-me' || /^\s*(?:[❤♥]\uFE0F?\s*)+(?:똑똑이\s*)?확인/.test(String(row.content || ''));
+}
 function telegramEligible(row) {
-  return row.room_slug === 'to-me' || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
+  return ownerActionMessage(row) || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
 }
 
 function telegramSummary(roomName, row) {
   const content = String(row.content || '').trim();
   const prefix = `[${row.room_slug === 'to-me' ? OWNER_ROOM_NAME : roomName}] ${String(row.sender || '').trim()}: `;
-  const roomUrl = `\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=${encodeURIComponent(row.room_slug || 'general')}`;
+  const roomUrl = ownerActionMessage(row)
+    ? '\n\n처리방: https://muse.ai/library/artifacts/ceoribang'
+    : `\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=${encodeURIComponent(row.room_slug || 'general')}`;
   // Telegram sendMessage limit is 4096 chars; keep a margin for prefix + room link.
   // Send the full text (no 3-line cut) so Telegram's own "read more" expands it on tap.
   const maxBody = 4000 - prefix.length - roomUrl.length;

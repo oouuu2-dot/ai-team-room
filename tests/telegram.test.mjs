@@ -61,9 +61,15 @@ test('only requested reports are queued with full text and a room link', async (
     await f.api.postMessage(f.env, room, { sender: '코덱스', content });
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
   assert.equal(f.sent.length, 4);
-  assert.equal(f.sent[0].text, '[가자상노!!방] 코덱스: 질문\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=to-me');
+  assert.equal(f.sent[0].text, '[가자상노!!방] 코덱스: 질문\n\n처리방: https://muse.ai/library/artifacts/ceoribang');
   assert.equal(f.sent[3].text, '[스마트스토어] 코덱스: 작업 완료\n둘\n셋\n넷\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=store');
   assert.ok(f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(4000) }).length <= 4096);
+  for (const content of ['❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️ 똑똑이 확인\n확인 요청','❤ 확인','♥️ 확인']) {
+    const row={room_slug:'blog',sender:'뮤즈',content};
+    assert.equal(f.api.telegramEligible(row),true);
+    assert.ok(f.api.telegramSummary('블로그',row).endsWith('처리방: https://muse.ai/library/artifacts/ceoribang'));
+    assert.ok(!f.api.telegramSummary('블로그',row).includes('회의실:'));
+  }
   f.db.close();
 });
 test('failed deliveries remain queued for cron retry', async () => {
