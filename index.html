@@ -369,6 +369,31 @@
   .more:hover{color:#d6336c}
   .msg.boss .body{padding:8px 14px}
   .messages{gap:4px}
+  /* Dedicated view of the existing pickles room; this does not start AI agents. */
+  body.pickle-chat{--accent:#f5d42b;--text:#292929;--muted:#63707b}
+  .pickle-chat .sidebar,.pickle-chat #menuBtn,.pickle-chat #toggleAll,.pickle-chat #markReadBtn,.pickle-chat #readBar,.pickle-chat .hint{display:none!important}
+  .pickle-chat .topbar{background:#fee500;border:0;padding:18px 22px;backdrop-filter:none}
+  .pickle-chat .roomtitle p{display:block;color:#544d22;white-space:normal}
+  .pickle-chat .messages{background:#b9cbd9;padding:20px;gap:10px}
+  .pickle-chat .msg{max-width:900px;border:0;gap:10px;padding:4px 0}
+  .pickle-chat .msg:hover{box-shadow:none}
+  .pickle-chat .avatar{display:grid;background:#f7f4eb;color:#353535!important;border:0;border-radius:13px;flex-basis:38px;height:38px}
+  .pickle-chat .msg .body{flex:0 1 auto;max-width:min(78%,700px);background:#fff;border-radius:0 14px 14px 14px;padding:10px 13px;margin:0;box-shadow:0 1px 2px #0001}
+  .pickle-chat .msg .who{color:#4c555b!important}
+  .pickle-chat .msg.mine{justify-content:flex-end}
+  .pickle-chat .msg.mine .avatar{display:none}
+  .pickle-chat .msg.mine .body{background:#fee500;border-radius:14px 0 14px 14px}
+  .pickle-chat .msg.boss:not(.mine) .body{background:#fff}
+  .pickle-chat .msg.cont .meta{display:flex}
+  .pickle-chat .msg .badge{display:none}
+  .pickle-chat .msg .time{color:#697984}
+  .pickle-chat .replybtn{opacity:1;position:static;margin-top:5px;background:none;border:0;color:#65717b;font-size:11px;box-shadow:none}
+  .pickle-chat .composer{background:#fff;padding-bottom:max(14px,env(safe-area-inset-bottom))}
+  .pickle-chat #sendBtn{background:#fee500;color:#302c1d;box-shadow:none}
+  .pickle-chat .daysep{color:#475a68}
+  .pickle-chat .topright a{color:#4d4620;font-size:12px;white-space:nowrap}
+  .pickle-chat #livePill{display:inline-block;background:#fff8b5;color:#4d4620;border:0;font-size:11px}
+  @media(max-width:520px){.pickle-chat .messages{padding:12px}.pickle-chat .topbar{padding:12px}.pickle-chat .msg .body{max-width:84%}.pickle-chat .topright{gap:5px;flex-direction:column}}
 </style>
 </head>
 <body>
@@ -482,6 +507,9 @@
     return SENDERS[0].name;
   }
   var POLL_MS = 10000;
+  var pickleChat = new URLSearchParams(location.search).get('view') === 'pickles';
+  function isPickleParticipant(name){ return name === '똑똑이' || /^피클[1-5]$/.test(name); }
+  if (pickleChat) document.body.classList.add('pickle-chat');
   var state = {
     key: localStorage.getItem('ai_team_room_key') || '',
     sender: normalizeSender(localStorage.getItem('ai_team_room_sender') || SENDERS[0].name),
@@ -497,6 +525,12 @@
     openDetails: {},
     readMark: 0
   };
+  if (pickleChat){
+    state.room = 'pickles';
+    state.sender = normalizeSender(localStorage.getItem('ai_team_pickles_sender') || '똑똑이');
+    if (!isPickleParticipant(state.sender)) state.sender = '똑똑이';
+    document.title = '피클 대화방';
+  }
 
   var $ = function(id){ return document.getElementById(id); };
   var elMessages = $('messages'), elInput = $('input'), elSend = $('sendBtn'),
@@ -629,12 +663,13 @@
 
   /* ---------- rooms ---------- */
   function renderSenders(){
-    elSender.innerHTML = SENDERS.map(function(s){
+    elSender.innerHTML = SENDERS.filter(function(s){ return !pickleChat || isPickleParticipant(s.name); }).map(function(s){
       return '<option value="' + esc(s.name) + '" title="' + esc(s.role) + '">' + s.emoji + ' ' + esc(s.name) + '</option>';
     }).join('');
     elSender.value = state.sender;
   }
   function renderRooms(){
+    if (pickleChat) return;
     var html = '<div class="label">회의실</div>';
     state.rooms.forEach(function(r){
       var unread = (r.slug !== state.room) ? (r.unread || 0) : 0;
@@ -653,7 +688,7 @@
       '<span class="rdesc" style="display:block">결재 대기 · 스레드·릴스·카드뉴스 진행</span></span>' +
       '<span class="cnt" id="progressBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
       '</button>';
-    elRoomList.innerHTML = html;
+    elRoomList.innerHTML = html + '<a class="room" href="/?view=pickles">💛 피클 전용 대화방</a>';
     Array.prototype.forEach.call(elRoomList.querySelectorAll('.room'), function(btn){
       btn.addEventListener('click', function(){
         switchRoom(btn.getAttribute('data-room'));
@@ -663,6 +698,11 @@
     if (pb) pb.addEventListener('click', showProgress);
   }
   function loadRooms(){
+    if (pickleChat){
+      $('roomName').textContent = '피클 대화방 · 1–5';
+      $('roomDesc').textContent = '기존 피클 토론방과 같은 대화 · 내 말풍선은 선택한 보내는 사람 기준';
+      return Promise.resolve();
+    }
     return api('/api/rooms').then(function(d){
       state.rooms = d.rooms || [];
       renderRooms();
@@ -709,6 +749,7 @@
     return '';
   }
   function msgHtml(m, prevDay){
+    if (pickleChat && !isPickleParticipant(m.sender)) return '';
     var day = kstDay(m.created_at);
     var out = '';
     var kind = msgKind(m);
@@ -716,8 +757,8 @@
     var cont = kind !== 'sys' && p && p.sender === m.sender && msgKind(p) !== 'sys' && !m.reply_to &&
       (new Date(m.created_at) - new Date(p.created_at)) < 5*60*1000 && kstDay(p.created_at) === day;
     lastForGroup = m;
-    var cls = 'msg' + (kind ? ' ' + kind : '') + (cont ? ' cont' : '');
-    var longTxt = kind === '' && m.content && (m.content.length > 90 || (m.content.match(/\n/g) || []).length > 1);
+    var cls = 'msg' + (kind ? ' ' + kind : '') + (cont ? ' cont' : '') + (pickleChat && m.sender === state.sender ? ' mine' : '');
+    var longTxt = !pickleChat && kind === '' && m.content && (m.content.length > 90 || (m.content.match(/\n/g) || []).length > 1);
     if (day && day !== prevDay){
       out += '<div class="daysep"><span>' + esc(day) + '</span></div>';
     }
@@ -727,7 +768,7 @@
         '<div class="meta"><span class="who" style="color:' + esc(m.color || '#fff') + '">' + esc(m.emoji || '') + ' ' + esc(m.sender) + '</span>' +
           '<span class="badge">' + esc(m.role || '참여자') + '</span>' +
           '<span class="time">' + esc(kstTime(m.created_at)) + '</span></div>';
-    if (m.reply_to){
+    if (m.reply_to && (!pickleChat || isPickleParticipant(m.reply_to.sender))){
       out += '<div class="replyq" data-target="' + m.reply_to.id + '"><b>' + esc(m.reply_to.sender) + '</b><span>' +
         esc(m.reply_to.content || (m.reply_to.attachment ? '📎 ' + m.reply_to.attachment.filename : '')).replace(/\n/g, ' ') + '</span></div>';
     }
@@ -749,7 +790,7 @@
     return out;
   }
   function renderAll(){
-    if (!state.messages.length){
+    if (!state.messages.some(function(m){ return !pickleChat || isPickleParticipant(m.sender); })){
       elMessages.innerHTML = '<div class="empty"><span class="big">💬</span>아직 메시지가 없습니다.<br>첫 인사를 남겨보세요.</div>';
       return;
     }
@@ -764,6 +805,7 @@
     placeDivider();
   }
   function placeDivider(){
+    if (pickleChat) return;
     var old = document.getElementById('readMarkDiv');
     if (old) old.remove();
     var mark = state.readMark || 0;
@@ -826,6 +868,7 @@
     placeDivider();
   }
   function loadReadMark(){
+    if (pickleChat) return Promise.resolve();
     return api('/api/rooms/' + encodeURIComponent(state.room) + '/read-mark').then(function(d){
       state.readMark = d.last_read_id || 0;
     }).catch(function(){ state.readMark = 0; });
@@ -847,6 +890,7 @@
           appendMessages(list);
         }
         setStatus(true, '연결됨 · ' + kstTime(new Date().toISOString()));
+        if (pickleChat) $('livePill').textContent = '연결됨 · 10초 확인';
         state.loading = false;
       });
     }).catch(function(err){
@@ -1006,7 +1050,8 @@
   });
   elSender.addEventListener('change', function(){
     state.sender = elSender.value;
-    localStorage.setItem('ai_team_room_sender', state.sender);
+    localStorage.setItem(pickleChat ? 'ai_team_pickles_sender' : 'ai_team_room_sender', state.sender);
+    if (pickleChat) renderAll();
   });
 
   /* ---------- 결재 ---------- */
@@ -1409,7 +1454,7 @@
         if (tick % 5 === 0) loadChecklist().catch(function(){});
       } else {
         loadMessages(false);
-        if (tick % 5 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); }
+        if (!pickleChat && tick % 5 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); }
       }
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
@@ -1424,11 +1469,16 @@
   var params = new URLSearchParams(location.search);
   var urlKey = params.get('key') || params.get('passcode');
   var urlRoom = params.get('room');
-  if (urlRoom) state.room = urlRoom;
+  if (urlRoom && !pickleChat) state.room = urlRoom;
+  if (pickleChat){
+    $('gate').querySelector('h2').textContent = '💛 피클 대화방';
+    $('livePill').textContent = '연결 중';
+    $('toggleAll').insertAdjacentHTML('beforebegin','<a href="/">회의실</a>');
+  }
   if (urlKey){
     tryKey(urlKey).then(function(ok){
       if (!ok) openGate('링크의 비밀번호가 맞지 않습니다.');
-      else if (history.replaceState) history.replaceState({}, '', location.pathname);
+      else if (history.replaceState){ params.delete('key'); params.delete('passcode'); history.replaceState({}, '', location.pathname + (params.size ? '?' + params.toString() : '')); }
     }).catch(function(){ openGate('연결할 수 없습니다.'); });
   } else if (state.key){
     fetch('/api/rooms', {headers:{'X-Room-Key': state.key}, cache:'no-store'})

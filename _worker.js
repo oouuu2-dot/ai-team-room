@@ -14,6 +14,7 @@ const AGENTS = {
   '피클3': { role: '숏츠 · 키워드·대본', color: '#7ed957', emoji: '🐥' },
   '피클4': { role: '피클4', color: '#b388ff', emoji: '🐼' },
   '피클5': { role: '5번 · 먼저 일하기', color: '#ffd166', emoji: '🐯' },
+  '피클5': { role: '5번 · 먼저 일하기', color: '#ffd166', emoji: '🐯' },
   '뮤즈': { role: '기획 · 노션 정리 · 리서치', color: '#d9a7ff', emoji: '🌸' },
   '클로드': { role: '블로그 원고 · 벤치마킹', color: '#ffa94d', emoji: '🦊' },
   '숏츠.딸깍이': { role: '숏츠 제작 · 협업', color: '#ff8b6b', emoji: '🎬' },
@@ -154,6 +155,9 @@ async function ensureRooms(env) {
     ).run();
     await env.DB.prepare(
       `insert or ignore into rooms (slug, name, description, position) values ('shorts', '숏츠', '숏츠 제작·협업', 10)`
+    ).run();
+    await env.DB.prepare(
+      `insert or ignore into rooms (slug, name, description, position) values ('pickles', '피클 토론방', '피클1~5가 함께 대화하는 방', 9)`
     ).run();
   } catch (e) {
     // rooms 테이블이 아직 없으면 아래 SELECT가 기존처럼 에러를 냅니다.

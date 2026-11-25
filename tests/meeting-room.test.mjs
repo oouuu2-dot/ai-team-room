@@ -166,3 +166,16 @@ test('invalid stages fail atomically and legacy rows keep unknown stages empty',
   assert.deepEqual(cleared.data.item.stages,[]);
   f.db.close();
 });
+
+test('Pickles room seed preserves existing room details and Pickle5 has a profile', async () => {
+  const f=await setup();
+  f.db.prepare("update rooms set description='기존 대화방' where slug='pickles'").run();
+  const listed=await f.api.handleApi(new Request('https://room.test/api/rooms',{headers:{Authorization:'Bearer test'}}),f.env,new URL('https://room.test/api/rooms'));
+  const data=await listed.json();
+  assert.equal(data.rooms.filter(r=>r.slug==='pickles').length,1);
+  assert.equal(data.rooms.find(r=>r.slug==='pickles').description,'기존 대화방');
+  const posted=await f.api.postMessage(f.env,'pickles',{sender:'피클5',content:'수신 OK'});
+  assert.equal(posted.message.sender,'피클5');
+  assert.equal(posted.message.emoji,'🐯');
+  f.db.close();
+});
