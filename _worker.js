@@ -307,7 +307,11 @@ function ownerActionMessage(row) {
   return row.room_slug === 'to-me' || /^\s*(?:[❤♥]\uFE0F?\s*)+(?:똑똑이\s*)?확인/.test(String(row.content || ''));
 }
 function telegramEligible(row) {
-  return ownerActionMessage(row) || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
+  if (ownerActionMessage(row) || /@똑똑이|\[피클 브리핑\]|완료/.test(String(row.content || ''))) return true;
+  // 전 방 새 글 알림(2026-11-25): AI 팀원의 새 글을 짧게 알림. 뮤즈·의장·똑똑이 본인 글은 제외(재촉·알림 루프 방지).
+  const sender = String(row.sender || '').trim();
+  if (sender === '뮤즈' || sender === '의장' || sender === '똑똑이') return false;
+  return true;
 }
 function ownerAddressed(row) {
   return ownerActionMessage(row) || /@똑똑이(?:\s|[.,!?]|$)|\[피클 브리핑\]/.test(String(row.content || ''));
