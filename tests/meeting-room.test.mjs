@@ -179,3 +179,26 @@ test('Pickles room seed preserves existing room details and Pickle5 has a profil
   assert.equal(posted.message.emoji,'🐯');
   f.db.close();
 });
+
+test('room workspace data persists independently and does not complete checklist items', async () => {
+  const f=await setup();item(f);
+  const call=async(method,slug,body,key='test')=>{
+    const req=new Request('https://room.test/api/rooms/'+slug+'/board',{method,headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+    const res=await f.api.handleApi(req,f.env,new URL(req.url));return {status:res.status,data:await res.json()};
+  };
+  const board={headline:'8편 제작',source_url:'https://example.com',cards:[{title:'후킹',text:'미선정',assignee:'',status:'선정 대기',progress:null}],productions:[{title:'KR 인스타',status:'대기',assignee:'클로드'}]};
+  assert.equal((await call('GET','shorts')).data.board,null);
+  assert.equal((await call('PATCH','shorts',board)).status,200);
+  const saved=await call('GET','shorts');
+  assert.deepEqual(saved.data.board,board);
+  assert.ok(saved.data.updated_at);
+  assert.equal((await call('GET','blog')).data.board,null);
+  assert.equal(f.db.prepare('select status from checklist where id=35').get().status,'todo');
+  assert.equal((await call('PATCH','shorts',{...board,source_url:'javascript:alert(1)'})).status,400);
+  assert.equal((await call('PATCH','shorts',{...board,cards:[{...board.cards[0],progress:101}]})).status,400);
+  assert.equal((await call('PATCH','shorts',{...board,cards:Array(9).fill(board.cards[0])})).status,400);
+  assert.equal((await call('PATCH','missing',board)).status,404);
+  assert.equal((await call('GET','shorts',null,'wrong')).status,401);
+  assert.deepEqual((await call('GET','shorts')).data.board,board);
+  f.db.close();
+});

@@ -369,6 +369,35 @@
   .more:hover{color:#d6336c}
   .msg.boss .body{padding:8px 14px}
   .messages{gap:4px}
+  /* Room workspaces */
+  .room-dashboard{flex:0 0 auto;max-height:48vh;overflow:auto;padding:18px 22px;background:linear-gradient(120deg,#f3f1ff,#f9f5f1);border-bottom:1px solid #e5e5ee}
+  .room-dashboard[hidden]{display:none}
+  .workspace-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .workspace-head h2{font-size:18px;margin:0;letter-spacing:-.5px}
+  .workspace-head p{font-size:12px;color:#626777;margin:3px 0 0;white-space:pre-wrap}
+  .workspace-metrics{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}
+  .workspace-metrics span{background:#fff;border:1px solid #e4e3ef;border-radius:9px;padding:5px 10px;font-size:11px}
+  .workspace-metrics b{font-size:16px;margin-right:4px}
+  .workspace-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .workspace-card{background:white;border:1px solid #e8e5ed;border-top:3px solid var(--room-accent,#8b73d7);border-radius:12px;padding:12px;min-width:0;box-shadow:0 3px 8px #34304d05}
+  .workspace-card h3{font-size:13px;margin:0 0 7px;display:flex;justify-content:space-between;gap:5px}
+  .workspace-card .ws-status{font-size:10px;font-weight:400;color:#5b5482;background:#f1edff;padding:1px 6px;border-radius:5px}
+  .workspace-card p{font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0;max-height:116px;overflow:auto}
+  .workspace-card .ws-owner{color:#747887;font-size:11px}
+  .workspace-tasks{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .workspace-task{background:#fff;border:1px solid #e2dfeb;border-radius:9px;padding:7px 10px;text-align:left;max-width:100%;font-size:11px}
+  .workspace-task strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+  .workspace-foot{font-size:10px;color:#777988;display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+  .workspace-foot a{color:#655397}
+  .production-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:10px}
+  .production-tile{border:1px solid #e2e4ec;border-radius:9px;background:#ffffffbb;padding:8px;font-size:11px;overflow-wrap:anywhere}
+  .production-tile span{display:block;color:#707687;font-size:10px;margin-top:4px}
+  body:not(.pickle-chat) .messages{background:#f8f8fb}
+  body:not(.pickle-chat) .msg{border:0;padding:10px 12px;border-radius:12px;background:#fff;margin-top:3px;max-width:900px}
+  body:not(.pickle-chat) .msg.boss{background:#fff0f4}
+  body:not(.pickle-chat) .topbar{background:#fff}
+  @media(max-width:900px){.workspace-grid,.production-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:520px){.room-dashboard{padding:12px;max-height:46vh}.workspace-head h2{font-size:16px}.workspace-card{padding:9px}.workspace-head{align-items:flex-start}.workspace-metrics span{padding:4px 7px}.workspace-card p{max-height:90px}}
   /* Dedicated view of the existing pickles room; this does not start AI agents. */
   body.pickle-chat{--accent:#f5d42b;--text:#292929;--muted:#63707b}
   .pickle-chat .sidebar,.pickle-chat #menuBtn,.pickle-chat #toggleAll,.pickle-chat #markReadBtn,.pickle-chat #readBar,.pickle-chat .hint{display:none!important}
@@ -425,6 +454,7 @@
       </div>
     </header>
 
+    <section class="room-dashboard" id="roomDashboard" aria-label="방 작업 현황" hidden></section>
     <div class="messages" id="messages"></div>
 
     <div class="approval" id="progressView">
@@ -718,6 +748,8 @@
     state.view = 'room';
     showRoomView();
     state.room = slug;
+    renderRoomWorkspace();
+    loadRoomBoard();
     state.lastId = 0;
     state.messages = [];
     state.readMark = 0;
@@ -1067,6 +1099,59 @@
     return '[' + (g || '오늘') + ']';
   }
   /* ---------- 진행 상황 ---------- */
+  var ROOM_WORKSPACES = {
+    general:{name:'팀 작업실',icon:'🧭',color:'#7863b9',desc:'담당과 진행 상황을 먼저 보고, 아래에서 이야기해요.'},
+    shorts:{name:'숏츠 작업실',icon:'🎬',color:'#e88750',desc:'키워드 → 후킹 → 대본 → 제작, 하나의 흐름으로 확인해요.'},
+    instagram:{name:'인스타 작업실',icon:'📸',color:'#c76894',desc:'카드뉴스·릴스의 준비, 제작, 검토 현황'},
+    blog:{name:'블로그 작업실',icon:'📝',color:'#59a18a',desc:'원고 준비부터 검증·임시저장까지'},
+    threads:{name:'스레드 작업실',icon:'🧵',color:'#658ea8',desc:'소재·문안·링크·예약 준비 현황'},
+    orders:{name:'업무 배정실',icon:'📮',color:'#bd8c40',desc:'팀 전체 작업의 담당과 다음 단계'},
+    store:{name:'스토어 작업실',icon:'🛍️',color:'#699f73',desc:'상품·분석·수정 작업 현황'},
+    'to-me':{name:'가자상노!!방',icon:'💌',color:'#c47a91',desc:'대표 확인이 필요한 결과와 요청'},
+    pickles:{name:'피클 작업실',icon:'🥒',color:'#82a06c',desc:'피클에게 전달된 작업과 대화'}
+  };
+  state.roomBoards = {};
+  state.boardErrors = {};
+  function roomItems(){
+    return (state.items || []).filter(function(it){
+      if (state.room === 'general' || state.room === 'orders') return true;
+      if (state.room === 'to-me') return it.status === 'done';
+      return roomForItem(it.title,it.assignee) === state.room;
+    });
+  }
+  function renderRoomWorkspace(){
+    var el = $('roomDashboard');
+    el.hidden = pickleChat || state.view !== 'room';
+    if (el.hidden) return;
+    var cfg = ROOM_WORKSPACES[state.room] || {name:'작업실',icon:'📂',color:'#8588a4',desc:'작업 현황과 대화를 한 곳에서'};
+    el.style.setProperty('--room-accent',cfg.color);
+    var saved = state.roomBoards[state.room], board = saved && saved.board;
+    var items = roomItems(), active=items.filter(function(it){return it.status==='todo';}), pending=items.filter(function(it){return it.status==='done';});
+    var h='<div class="workspace-head"><div><h2>'+cfg.icon+' '+esc(cfg.name)+'</h2><p>'+esc(board && board.headline || cfg.desc)+'</p></div><button class="btn-mini ghost" data-open-progress>전체 현황 ↗</button></div>';
+    h+=state.itemsLoaded?'<div class="workspace-metrics"><span><b>'+items.length+'</b>등록 작업</span><span><b>'+active.length+'</b>진행 중</span><span><b>'+pending.length+'</b>결재 대기</span></div>':'<div class="workspace-foot">등록 작업 불러오는 중…</div>';
+    if (board && board.cards.length){
+      h+='<div class="workspace-grid">';
+      board.cards.forEach(function(c){h+='<article class="workspace-card"><h3>'+esc(c.title)+'<span class="ws-status">'+esc(c.status)+'</span></h3><p>'+esc(c.text)+'</p><div class="ws-owner">담당 '+esc(c.assignee || '미배정')+' · '+(c.progress===null?'진행률 미보고':c.progress+'%')+'</div>'+(c.progress!==null?'<div class="pbar"><div class="pfill" style="width:'+c.progress+'%;background:'+cfg.color+'"></div></div>':'')+'</article>';});
+      h+='</div>';
+      if(board.productions.length){h+='<div class="production-grid">';board.productions.forEach(function(p,i){h+='<div class="production-tile"><b>'+String(i+1).padStart(2,'0')+'</b> '+esc(p.title)+'<span>'+esc(p.status)+' · '+esc(p.assignee || '담당 미배정')+'</span></div>';});h+='</div>';}
+    } else if (items.length){
+      h+='<div class="workspace-grid">';
+      sortItems(items).slice(0,4).forEach(function(it){h+='<article class="workspace-card"><h3>#'+it.id+'<span class="ws-status">'+esc(statusLabel(it.status))+'</span></h3><p>'+esc(it.title)+'</p><div class="ws-owner">'+esc(it.assignee || '담당 미배정')+' · '+pctOf(it)+'%</div><div class="pbar"><div class="pfill" style="width:'+pctOf(it)+'%;background:'+cfg.color+'"></div></div>'+((it.stages || []).length?'<p>'+it.stages.map(function(s){return esc(s.name)+' '+(s.progress===null?'미보고':s.progress+'%');}).join(' → ')+'</p>':'<p>단계별 상세는 전체 현황에서 설정해요.</p>')+'</article>';});h+='</div>';
+    } else {h+='<div class="workspace-card"><h3>등록된 작업을 기다리고 있어요</h3><p>작업이 등록되면 담당·단계·진행률이 여기에 보여요.</p></div>';}
+    h+='<div class="workspace-tasks">';sortItems(items).slice(0,8).forEach(function(it){h+='<button class="workspace-task" data-workspace-task="'+it.id+'"><strong>'+esc(it.title)+'</strong>'+esc(it.assignee || '미배정')+' · '+esc(statusLabel(it.status))+' · '+pctOf(it)+'%</button>';});h+='</div>';
+    h+='<div class="workspace-foot"><span>'+(state.boardErrors[state.room]?'상태판 연결 실패 · 이전 표시가 남아 있을 수 있어요':saved && saved.updated_at?'상태 보고 '+esc(fmtTime(saved.updated_at)):'체크리스트 기준 · 상세 보고 미등록')+'</span>'+(board && isHttpUrl(board.source_url)?'<a href="'+esc(board.source_url)+'" target="_blank" rel="noopener">원본 작업실 ↗</a>':'')+'<span>아래는 대화 · 상태판은 50초마다 확인</span></div>';
+    el.innerHTML=h;
+  }
+  function loadRoomBoard(){
+    if(pickleChat) return Promise.resolve();
+    var room=state.room;
+    return api('/api/rooms/'+encodeURIComponent(room)+'/board').then(function(d){state.roomBoards[room]=d;state.boardErrors[room]=false;if(state.room===room)renderRoomWorkspace();}).catch(function(){state.boardErrors[room]=true;if(state.room===room)renderRoomWorkspace();});
+  }
+  $('roomDashboard').addEventListener('click',function(e){
+    var task=e.target.closest('[data-workspace-task]');
+    if(task){state.openDetails[parseInt(task.getAttribute('data-workspace-task'),10)]=true;showProgress();}
+    else if(e.target.closest('[data-open-progress]'))showProgress();
+  });
   var TRACKS = [
     {key:'threads', name:'스레드', re:/스레드/},
     {key:'shorts', name:'숏츠', re:/숏츠/},
@@ -1117,6 +1202,7 @@
   }
   function showProgress(){
     state.view = 'progress';
+    $('roomDashboard').hidden = true;
     document.body.classList.remove('nav-open');
     elMessages.style.display = 'none';
     elComposer.style.display = 'none';
@@ -1242,6 +1328,7 @@
   });
   function showRoomView(){
     state.view = 'room';
+    renderRoomWorkspace();
     elMessages.style.display = '';
     elComposer.style.display = '';
     $('markReadBtn').style.display = '';
@@ -1256,6 +1343,8 @@
   function loadChecklist(){
     return api('/api/checklist').then(function(d){
       state.items = d.items || [];
+      state.itemsLoaded = true;
+      renderRoomWorkspace();
       renderApproval();
       renderProgress();
     }).catch(function(err){
@@ -1448,6 +1537,7 @@
     renderSenders();
     loadRooms().catch(function(){ setStatus(false, '연결 끊김'); });
     loadMessages(true);
+    if (!pickleChat){ loadChecklist(); loadRoomBoard(); renderRoomWorkspace(); }
     if (state.timer) clearInterval(state.timer);
     var tick = 0;
     state.timer = setInterval(function(){
@@ -1457,7 +1547,7 @@
         if (tick % 5 === 0) loadChecklist().catch(function(){});
       } else {
         loadMessages(false);
-        if (!pickleChat && tick % 5 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); }
+        if (!pickleChat && tick % 5 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); loadRoomBoard(); }
       }
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){

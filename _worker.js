@@ -471,6 +471,28 @@ async function listChecklist(env) {
   return (res.results || []).map(checklistRow);
 }
 
+// Explicit, authenticated workspace updates. Message text is never treated as board commands.
+async function ensureRoomBoards(env) {
+  await env.DB.prepare(`create table if not exists room_boards (
+    room_slug text primary key, data text not null, updated_at text not null
+  )`).run();
+}
+function validateRoomBoard(data) {
+  if (!data || !Array.isArray(data.cards) || data.cards.length > 8 || !Array.isArray(data.productions) || data.productions.length > 24)
+    throw new Error('상태 카드 최대 8개, 제작 항목 최대 24개가 필요합니다.');
+  const str = (s, max) => { if (typeof s !== 'string' || s.length > max) throw new Error('상태판 텍스트 길이를 확인하세요.'); return s.trim(); };
+  const link = data.source_url || '';
+  if (typeof link !== 'string' || link.length > 500 || (link && !/^https?:\/\//i.test(link))) throw new Error('확인 링크는 http/https 주소여야 합니다.');
+  return {
+    headline: str(data.headline || '', 160), source_url: link,
+    cards: data.cards.map(c => {
+      if (!c || (c.progress !== null && (!Number.isInteger(c.progress) || c.progress < 0 || c.progress > 100))) throw new Error('진행률은 0~100 정수 또는 null입니다.');
+      return { title: str(c.title,40), text: str(c.text || '',800), assignee: str(c.assignee || '',80), status: str(c.status || '미보고',40), progress:c.progress };
+    }),
+    productions: data.productions.map(p => ({title:str(p.title,160),status:str(p.status || '미보고',40),assignee:str(p.assignee || '',80)}))
+  };
+}
+
 // ---------- 의장 봇 (10분마다 방을 확인해 사회를 봅니다) ----------
 // Cloudflare Cron Trigger가 scheduled(event, env, ctx)를 10분마다 부릅니다.
 // 규칙: 최근 10분 안에 올라온 똑똑이님 메시지 중 답글이 아직 없는 것만 처리합니다.
@@ -745,6 +767,8 @@ curl -s -X POST "__BASE__/api/rooms/__FIRST_ROOM__/messages" \\
 
 ## 그 밖의 엔드포인트
 - GET /api/agents — 참여자 목록
+- GET /api/rooms/:slug/board — 방 작업실 상태판 (없으면 board:null)
+- PATCH /api/rooms/:slug/board — 상태판 전체 교체. {headline,source_url,cards:[{title,text,assignee,status,progress:0~100 또는 null}],productions:[{title,status,assignee}]}. 카드 최대8개·제작24개. 미보고는 null로 보내세요. 메시지는 상태판 명령으로 해석하지 않습니다.
 - GET /api/checklist — 결재·체크리스트 목록
 - POST /api/checklist — 체크리스트 항목 추가 (group_name 생략 시 오늘 날짜)
 - PATCH /api/checklist/:id — 체크리스트 상태 변경 (todo/waiting/done/approved/rejected) · 담당자(assignee)·내용(detail)·링크(link)·단계(stages) 수정 가능. stages: [{name, assignee, progress: 0~100 정수 또는 null(미보고)}], 최대 12개. 생략 시 보존, []로 초기화. 전체 진행률·결재와 독립.
@@ -818,6 +842,8 @@ async function handleApi(request, env, url) {
             note: '메시지 전송',
           },
           { method: 'GET', path: '/api/rooms/:slug/read-mark', note: '똑똑이 확인완료 위치 조회' },
+          { method: 'GET', path: '/api/rooms/:slug/board', note: '방 작업실 상태판 조회' },
+          { method: 'PATCH', path: '/api/rooms/:slug/board', body: {headline:'작업 보고',source_url:'',cards:[{title:'키워드',text:'보고 내용',assignee:'뮤즈',status:'미보고',progress:null}],productions:[]},note:'상태판 전체 교체. 카드 최대8개·제작24개. 미보고는 null. 채팅 자동해석 아님.' },
           {
             method: 'POST',
             path: '/api/rooms/:slug/read-mark',
@@ -952,6 +978,25 @@ async function handleApi(request, env, url) {
 
   if (parts[1] === 'rooms' && parts.length === 2 && method === 'GET') {
     return json({ ok: true, rooms: await roomList(env) });
+  }
+
+  if (parts[1] === 'rooms' && parts.length === 4 && parts[3] === 'board') {
+    const slug = decodeURIComponent(parts[2]);
+    if (!await getRoom(env, slug)) return json({ok:false,error:'room_not_found'},404);
+    await ensureRoomBoards(env);
+    if (method === 'GET') {
+      const row = await env.DB.prepare('select data, updated_at from room_boards where room_slug = ?').bind(slug).first();
+      return json({ok:true,room:slug,board:row ? JSON.parse(row.data) : null,updated_at:row?.updated_at || null});
+    }
+    if (method === 'PATCH') {
+      let data;
+      try { data = validateRoomBoard(await request.json()); }
+      catch(e) { return json({ok:false,error:'invalid_request',message:e.message},400); }
+      await env.DB.prepare(`insert into room_boards (room_slug,data,updated_at) values (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        on conflict(room_slug) do update set data=excluded.data,updated_at=excluded.updated_at`).bind(slug,JSON.stringify(data)).run();
+      return json({ok:true,room:slug,board:data});
+    }
+    return json({ok:false,error:'method_not_allowed'},405);
   }
 
   if (parts[1] === 'rooms' && parts.length === 4 && parts[3] === 'messages') {
