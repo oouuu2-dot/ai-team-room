@@ -309,17 +309,27 @@ function ownerActionMessage(row) {
 function telegramEligible(row) {
   return ownerActionMessage(row) || /@똑똑이|\[피클 브리핑\]|완료/.test(row.content);
 }
+function ownerAddressed(row) {
+  return ownerActionMessage(row) || /@똑똑이(?:\s|[.,!?]|$)|\[피클 브리핑\]/.test(String(row.content || ''));
+}
+function telegramRoomUrl(row) {
+  return `https://ai-team-room.oouuu2.workers.dev/?room=${encodeURIComponent(row.room_slug || 'general')}`;
+}
 
 function telegramSummary(roomName, row) {
   const content = String(row.content || '').trim();
   const prefix = `[${row.room_slug === 'to-me' ? OWNER_ROOM_NAME : roomName}] ${String(row.sender || '').trim()}: `;
+  if (!ownerAddressed(row)) {
+    const firstLine = content.split(/\r?\n/).map(line => line.trim()).find(Boolean) || '(첨부 또는 내용 없음)';
+    return prefix + Array.from(firstLine).slice(0,120).join('') + ' ...';
+  }
   const roomUrl = ownerActionMessage(row)
     ? '\n\n처리방: https://muse.ai/library/artifacts/ceoribang'
-    : `\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=${encodeURIComponent(row.room_slug || 'general')}`;
+    : `\n\n회의실: ${telegramRoomUrl(row)}`;
   // Telegram sendMessage limit is 4096 chars; keep a margin for prefix + room link.
   // Send the full text (no 3-line cut) so Telegram's own "read more" expands it on tap.
   const maxBody = 4000 - prefix.length - roomUrl.length;
-  const body = content.length > maxBody ? content.slice(0, Math.max(0, maxBody)) + '…' : content;
+  const body = content.length > maxBody ? content.slice(0, Math.max(0, maxBody)).replace(/[\uD800-\uDBFF]$/,'') + '…' : content;
   return prefix + body + roomUrl;
 }
 
@@ -334,18 +344,23 @@ async function queueTelegram(env, row) {
 async function flushTelegram(env) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
   await ensureTelegram(env);
-  const rows = await env.DB.prepare(`select message_id, text from telegram_outbox
-    where sent_at is null and (lease_until is null or datetime(lease_until) < datetime('now'))
-    order by message_id limit 20`).all();
+  const rows = await env.DB.prepare(`select o.message_id, o.text, m.room_slug, m.sender, m.content, r.name as room_name
+    from telegram_outbox o left join messages m on m.id=o.message_id left join rooms r on r.slug=m.room_slug
+    where o.sent_at is null and (o.lease_until is null or datetime(o.lease_until) < datetime('now'))
+    order by o.message_id limit 20`).all();
   for (const row of rows.results || []) {
     const claim = await env.DB.prepare(`update telegram_outbox set lease_until = datetime('now', '+2 minutes'), attempts = attempts + 1
       where message_id = ? and sent_at is null and (lease_until is null or datetime(lease_until) < datetime('now'))`)
       .bind(row.message_id).run();
     if (!claim.meta?.changes) continue;
     try {
+      const text = row.room_slug ? telegramSummary(row.room_name || row.room_slug,row) : row.text;
+      const payload = {chat_id:env.TELEGRAM_CHAT_ID,text};
+      // Telegram entities use UTF-16 offsets, matching JS string lengths. No HTML parsing of user text.
+      if (row.room_slug && !ownerAddressed(row)) payload.entities=[{type:'text_link',offset:0,length:text.length,url:telegramRoomUrl(row)}];
       const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: row.text }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(15000),
       });
       const result = await response.json();

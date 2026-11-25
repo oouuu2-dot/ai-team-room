@@ -55,20 +55,40 @@ test('webhook authenticates group and person, deduplicates and never echoes', as
   assert.equal(f.db.prepare('select count(*) n from telegram_outbox').get().n, 0);
   f.db.close();
 });
-test('only requested reports are queued with full text and a room link', async () => {
+test('owner reports retain full text; other delivered reports are one clickable line', async () => {
   const f = fixture();
   for (const [room, content] of [['general','평범한 글'], ['to-me','질문'], ['blog','@똑똑이 확인'], ['general','[피클 브리핑] 오늘'], ['store','작업 완료\n둘\n셋\n넷']])
     await f.api.postMessage(f.env, room, { sender: '코덱스', content });
   await f.api.flushTelegram(f.env); await f.api.flushTelegram(f.env);
   assert.equal(f.sent.length, 4);
   assert.equal(f.sent[0].text, '[가자상노!!방] 코덱스: 질문\n\n처리방: https://muse.ai/library/artifacts/ceoribang');
-  assert.equal(f.sent[3].text, '[스마트스토어] 코덱스: 작업 완료\n둘\n셋\n넷\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=store');
+  assert.equal(f.sent[3].text, '[스마트스토어] 코덱스: 작업 완료 ...');
+  assert.deepEqual(f.sent[3].entities,[{type:'text_link',offset:0,length:f.sent[3].text.length,url:'https://ai-team-room.oouuu2.workers.dev/?room=store'}]);
+  assert.equal(f.sent[0].entities,undefined);
+  assert.equal(f.sent[1].text,'[블로그] 코덱스: @똑똑이 확인\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=blog');
+  assert.equal(f.sent[2].text,'[종합] 코덱스: [피클 브리핑] 오늘\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=general');
   assert.ok(f.api.telegramSummary('종합', { sender: '코덱스', content: '가'.repeat(4000) }).length <= 4096);
   for (const content of ['❤️❤️❤️❤️❤️❤️❤️❤️❤️❤️ 똑똑이 확인\n확인 요청','❤ 확인','♥️ 확인']) {
     const row={room_slug:'blog',sender:'뮤즈',content};
     assert.equal(f.api.telegramEligible(row),true);
     assert.ok(f.api.telegramSummary('블로그',row).endsWith('처리방: https://muse.ai/library/artifacts/ceoribang'));
     assert.ok(!f.api.telegramSummary('블로그',row).includes('회의실:'));
+  }
+  f.db.close();
+});
+
+test('emoji, angle brackets and pending old payloads preserve safe clickable formatting', async () => {
+  const f=fixture();
+  const report=await f.api.postMessage(f.env,'blog',{sender:'코덱스',content:'🎉 완료 <안내> & 링크\n둘째 줄'});
+  f.db.prepare('update telegram_outbox set text=? where message_id=?').run('과거 형식',report.message.id);
+  await f.api.flushTelegram(f.env);
+  assert.equal(f.sent[0].text,'[블로그] 코덱스: 🎉 완료 <안내> & 링크 ...');
+  assert.equal(f.sent[0].entities[0].length,f.sent[0].text.length);
+  assert.equal(f.sent[0].parse_mode,undefined);
+  for(const [room,content] of [['to-me','앞\n뒤'],['blog','@똑똑이 앞\n뒤'],['general','❤️ 확인\n뒤'],['orders','[피클 브리핑] 앞\n뒤']]) {
+    const text=f.api.telegramSummary('방',{room_slug:room,sender:'뮤즈',content});
+    assert.ok(text.includes('\n뒤'));
+    assert.ok(!text.endsWith(' ...'));
   }
   f.db.close();
 });
