@@ -38,6 +38,7 @@ function normalizeMentions(content) {
 // 방 목록은 D1 의 rooms 테이블이 기준입니다. (schema.sql 기본값: general / instagram / blog / store / later)
 
 const PALETTE = ['#ff5c8a', '#6fc3ff', '#f0b070', '#a78bfa', '#5ed6a8', '#ffd166', '#ff8b6b', '#8fb8ff'];
+const OWNER_ROOM_NAME = '가자상노!!방';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -140,13 +141,15 @@ async function attachReplies(env, messages, slug) {
   return messages;
 }
 
-// 방 목록을 읽기 전에, 없을 수 있는 두 방(지시방·똑똑이에게 온 채팅)을 먼저 만들어 둡니다.
+// 방 목록을 읽기 전에 기본 방과 표시 이름을 맞춥니다. 방 slug와 메시지는 유지합니다.
 // INSERT OR IGNORE라 이미 있으면 아무 일도 안 생깁니다. D1 콘솔을 따로 거칠 필요가 없습니다.
 async function ensureRooms(env) {
   try {
     await env.DB.prepare(
-      `insert or ignore into rooms (slug, name, description, position) values ('to-me', '똑똑이에게 온 채팅', 'AI들이 똑똑이님께 물어볼 때 쓰는 방', 6)`
+      `insert or ignore into rooms (slug, name, description, position) values ('to-me', '가자상노!!방', 'AI들이 똑똑이님께 물어볼 때 쓰는 방', 6)`
     ).run();
+    await env.DB.prepare("update rooms set name = ? where slug = 'to-me' and name != ?")
+      .bind(OWNER_ROOM_NAME, OWNER_ROOM_NAME).run();
     await env.DB.prepare(
       `insert or ignore into rooms (slug, name, description, position) values ('orders', '지시방', '똑똑이님이 지시를 올리는 방 · AI들이 역할 나눠서 실행', 7)`
     ).run();
@@ -306,7 +309,7 @@ function telegramEligible(row) {
 
 function telegramSummary(roomName, row) {
   const content = String(row.content || '').trim();
-  const prefix = `[${roomName}] ${String(row.sender || '').trim()}: `;
+  const prefix = `[${row.room_slug === 'to-me' ? OWNER_ROOM_NAME : roomName}] ${String(row.sender || '').trim()}: `;
   const roomUrl = `\n\n회의실: https://ai-team-room.oouuu2.workers.dev/?room=${encodeURIComponent(row.room_slug || 'general')}`;
   // Telegram sendMessage limit is 4096 chars; keep a margin for prefix + room link.
   // Send the full text (no 3-line cut) so Telegram's own "read more" expands it on tap.
@@ -661,7 +664,7 @@ async function stallNudge(env) {
 }
 
 // 매일 할 일 알림: 저녁 19시(KST) 이후에 [매일] 항목이 아직 안 끝났으면
-// '똑똑이에게 온 채팅' 방에 하루 1번만 알림을 남깁니다.
+// to-me(가자상노!!방)에 하루 1번만 알림을 남깁니다.
 async function dailyReminder(env) {
   const hour = await env.DB.prepare(
     "select CAST(strftime('%H', 'now', '+9 hours') AS INTEGER) as h"
