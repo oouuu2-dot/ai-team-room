@@ -797,6 +797,7 @@
     var html = '', prevDay = '';
     lastForGroup = null;
     state.messages.forEach(function(m){
+      if (pickleChat && !isPickleParticipant(m.sender)) return;
       html += msgHtml(m, prevDay);
       prevDay = kstDay(m.created_at);
     });
@@ -853,10 +854,12 @@
   function appendMessages(list){
     if (!list.length) return;
     var stick = nearBottom();
-    var prevDay = state.messages.length ? kstDay(state.messages[state.messages.length - 1].created_at) : '';
+    var visible = state.messages.filter(function(m){ return !pickleChat || isPickleParticipant(m.sender); });
+    var prevDay = visible.length ? kstDay(visible[visible.length - 1].created_at) : '';
     var html = '';
-    lastForGroup = state.messages.length ? state.messages[state.messages.length - 1] : null;
+    lastForGroup = visible.length ? visible[visible.length - 1] : null;
     list.forEach(function(m){
+      if (pickleChat && !isPickleParticipant(m.sender)) return;
       html += msgHtml(m, prevDay);
       prevDay = kstDay(m.created_at);
     });
