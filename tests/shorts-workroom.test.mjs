@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {runInNewContext} from 'node:vm';
-import {webcrypto} from 'node:crypto';
+import {webcrypto,createHmac} from 'node:crypto';
 const src=readFileSync(new URL('../_worker.js',import.meta.url),'utf8');
 function fixture(storage=true){
  const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../schema.sql',import.meta.url),'utf8'));
@@ -11,7 +11,7 @@ function fixture(storage=true){
  const objects=new Map(),uploads=new Map();let n=0;
  const R2={async createMultipartUpload(key){const uploadId=String(++n);uploads.set(uploadId,{key,parts:new Map()});return {uploadId};},resumeMultipartUpload(key,id){const u=uploads.get(id);assert.equal(u.key,key);return {async uploadPart(number,bytes){u.parts.set(number,new Uint8Array(bytes));return {partNumber:number,etag:'etag'+number};},async complete(parts){const b=Buffer.concat(parts.map(p=>Buffer.from(u.parts.get(p.partNumber))));objects.set(key,b);return {size:b.length};}};},async head(key){const b=objects.get(key);return b?{size:b.length}:null;},async get(key,options){const b=objects.get(key);if(!b)return null;let body=b,range;if(options?.range){const match=options.range.get('range').match(/bytes=(\d+)-(\d*)/);const offset=Number(match[1]),end=match[2]?Math.min(Number(match[2]),b.length-1):b.length-1;range={offset,length:end-offset+1};body=b.subarray(offset,end+1);}return {body,size:b.length,httpEtag:'"etag"',range};}};
  const env={DB,ROOM_KEY:'test',...(storage?{SHORTS_FILES:R2}:{})};
- const api=runInNewContext(src.replace('export default {','const worker = {')+'\n({handleApi,shortsApi,swRead,swSave,swTicketValid})',{Request,Response,Headers,URL,console,crypto:webcrypto,Uint8Array});
+ const api=runInNewContext(src.replace('export default {','const worker = {')+'\n({handleApi,shortsApi,swRead,swSave,swTicketValid,officeStorage})',{Request,Response,Headers,URL,console,crypto:webcrypto,Uint8Array,TextEncoder,TextDecoder,atob,btoa});
  async function call(route='',method='GET',body,auth=true,headers={}){const req=new Request('https://test/api/shorts-workroom'+route,{method,headers:{...(auth?{Authorization:'Bearer test'}:{}),...headers},body:body===undefined?undefined:body instanceof Uint8Array?body:JSON.stringify(body)});const handler=auth&&method!=='GET'?api.shortsApi:api.handleApi;const r=await handler(req,env,new URL(req.url));return {status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():await r.arrayBuffer(),headers:r.headers};}
  return {db,env,api,call};
 }
@@ -70,5 +70,23 @@ test('public legacy mutations stop before database access after move to office',
  const response=await f.api.handleApi(req,f.env,new URL(req.url));
  assert.equal(response.status,410);assert.equal((await response.json()).target,'https://oouuu2.pythonanywhere.com/');
  assert.equal(f.db.prepare("select count(*) n from sqlite_master where name='shorts_cards'").get().n,0);f.db.close();
+});
+test('office file gateway works without D1 and checks scoped signed capabilities and receipts',async()=>{
+ const f=fixture();f.env.DB={prepare(){throw Error('Gateway must never query D1');}};
+ const cid=12,fid='00000000-0000-4000-8000-000000000001',size=17;
+ function token(purpose,extra={}){const body=Buffer.from(JSON.stringify({purpose,file_id:fid,card_id:cid,key:`office/cards/${cid}/${fid}`,size,mime:'video/mp4',name:'검증.mp4',exp:Math.floor(Date.now()/1000)+1800,...extra})).toString('base64url');return body+'.'+createHmac('sha256','test').update(body).digest('base64url');}
+ async function call(action,ticket,body,method='POST',query=''){
+ const u=new URL('https://test/api/office-shorts-storage/'+action+'?ticket='+ticket+query),req=new Request(u,{method,body:body===undefined?undefined:body instanceof Uint8Array?body:JSON.stringify(body)});
+ return f.api.handleApi(req,f.env,u);}
+ assert.equal((await call('start','forged',{})).status,401);
+ assert.equal((await call('start',token('read'),{})).status,403);
+ assert.equal((await call('start',token('upload',{exp:0}),{})).status,401);
+ const ticket=token('upload'),start=await (await call('start',ticket,{})).json();
+ const part=await (await call('part',ticket,new Uint8Array(size).fill(7),'POST','&number=1&upload_id='+start.upload_id)).json();
+ const complete=await (await call('complete',ticket,{upload_id:start.upload_id,parts:[part.part]})).json();
+ const [payload,signature]=complete.receipt.split('.');assert.equal(signature,createHmac('sha256','test').update(payload).digest('base64url'));
+ assert.equal(JSON.parse(Buffer.from(payload,'base64url')).purpose,'receipt');
+ const r=await call('read',token('read'),undefined,'GET');assert.equal(r.status,200);assert.deepEqual([...new Uint8Array(await r.arrayBuffer())],Array(size).fill(7));
+ f.db.close();
 });
 

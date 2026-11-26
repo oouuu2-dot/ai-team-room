@@ -839,6 +839,7 @@ async function handleApi(request, env, url) {
     return json({ ok: dbOk, service: 'ai-team-room', db: dbOk, time: new Date().toISOString() });
   }
 
+  if (parts[1] === 'office-shorts-storage') return officeStorage(request,env,url);
   const mediaTicket = url.pathname.startsWith('/api/shorts-workroom/') && request.method === 'GET' && await swTicketValid(env,url);
   if (!mediaTicket && !authorized(request, env, url)) {
     return json(
@@ -1327,6 +1328,56 @@ async function shortsApi(request,env,url) {
     }
     throw swError('not_found',404);
   }catch(e){if(e.status)return json({ok:false,error:e.message},e.status);throw e;}
+}
+
+
+// Media-only capability gateway. Card state and APIs live in PythonAnywhere.
+function officeB64(bytes){let s='';for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+async function officeSign(payload,key){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(key),{name:'HMAC',hash:'SHA-256'},false,['sign']);return officeB64(new Uint8Array(await crypto.subtle.sign('HMAC',k,new TextEncoder().encode(payload))));}
+async function officeStorage(request,env,url){
+ try{
+  const token=url.searchParams.get('ticket')||'',dot=token.indexOf('.'),payload=token.slice(0,dot),signature=token.slice(dot+1);
+  let signingKey='';for(const key of [env.ROOM_KEY,env.API_KEY].filter(Boolean))if(same(await officeSign(payload,key),signature)){signingKey=key;break;}
+  if(!signingKey)return json({ok:false,error:'invalid_media_capability'},401);
+  let c;try{c=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(payload.length/4)*4,'=')),x=>x.charCodeAt(0))));}catch{return json({ok:false,error:'invalid_media_capability'},401);}
+  if(!Number.isSafeInteger(c.exp)||c.exp<Date.now()/1000||c.exp>Date.now()/1000+7300||!/^office\/cards\/[1-9]\d*\/[a-f0-9-]{36}$/.test(c.key)||!Number.isSafeInteger(c.size)||c.size<1||c.size>SW_MAX_FILE)return json({ok:false,error:'invalid_or_expired_media_capability'},401);
+  if(!env.SHORTS_FILES)return json({ok:false,error:'storage_unavailable'},503);
+  const action=url.pathname.split('/').filter(Boolean)[2];
+  if(action==='read'&&request.method==='GET'&&c.purpose==='read'){
+   const range=request.headers.get('range');
+   if(range&&!/^bytes=(\d+-\d*|-\d+)$/.test(range))return json({ok:false,error:'invalid_range'},416);
+   const obj=await env.SHORTS_FILES.get(c.key,range?{range:request.headers}:undefined);if(!obj)return json({ok:false,error:'file_not_found'},404);
+   const h=new Headers({...CORS,'content-type':c.mime,'cache-control':'private, no-store','accept-ranges':'bytes','x-content-type-options':'nosniff','access-control-expose-headers':'Content-Range,Content-Length','content-disposition':`${/^(video\/|audio\/|image\/)/.test(c.mime)?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(c.name)}`});
+   h.set('etag',obj.httpEtag);if(obj.range){const o=obj.range.offset??Math.max(0,obj.size-obj.range.suffix),n=obj.range.length??obj.range.suffix;h.set('content-range',`bytes ${o}-${o+n-1}/${obj.size}`);h.set('content-length',String(n));}else h.set('content-length',String(obj.size));
+   return new Response(obj.body,{status:obj.range?206:200,headers:h});
+  }
+  if(c.purpose!=='upload'||request.method!=='POST')return json({ok:false,error:'capability_action_denied'},403);
+  if(action==='start'){
+   const upload=await env.SHORTS_FILES.createMultipartUpload(c.key,{httpMetadata:{contentType:c.mime}});
+   return json({ok:true,upload_id:upload.uploadId,part_size:SW_PART});
+  }
+  if(action==='part'){
+   const number=Number(url.searchParams.get('number')),total=Math.ceil(c.size/SW_PART),uploadId=url.searchParams.get('upload_id');
+   if(!Number.isInteger(number)||number<1||number>total||!uploadId)return json({ok:false,error:'invalid_part'},400);
+   const expected=number===total?c.size-SW_PART*(number-1):SW_PART,reader=request.body?.getReader(),chunks=[];let received=0;
+   if(!reader)return json({ok:false,error:'empty_part'},400);
+   for(;;){const {done,value}=await reader.read();if(done)break;received+=value.length;if(received>expected){await reader.cancel();return json({ok:false,error:'part_size_mismatch'},400);}chunks.push(value);}
+   if(received!==expected)return json({ok:false,error:'part_size_mismatch'},400);
+   const bytes=new Uint8Array(received);let pos=0;for(const chunk of chunks){bytes.set(chunk,pos);pos+=chunk.length;}
+   const part=await env.SHORTS_FILES.resumeMultipartUpload(c.key,uploadId).uploadPart(number,bytes);return json({ok:true,part});
+  }
+  if(action==='complete'){
+   const b=await request.json(),total=Math.ceil(c.size/SW_PART);
+   if(!Array.isArray(b.parts)||b.parts.length!==total||b.parts.some((p,i)=>p.partNumber!==i+1||typeof p.etag!=='string'))return json({ok:false,error:'missing_parts'},400);
+   let head=await env.SHORTS_FILES.head(c.key);
+   if(!head){await env.SHORTS_FILES.resumeMultipartUpload(c.key,b.upload_id).complete(b.parts);head=await env.SHORTS_FILES.head(c.key);}
+   if(!head||head.size!==c.size)return json({ok:false,error:'uploaded_size_mismatch'},409);
+   const receipt={purpose:'receipt',file_id:c.file_id,object_key:c.key,size:c.size,mime:c.mime,exp:Math.floor(Date.now()/1000)+1800};
+   const body=officeB64(new TextEncoder().encode(JSON.stringify(receipt)));
+   return json({ok:true,receipt:body+'.'+await officeSign(body,signingKey)});
+  }
+  return json({ok:false,error:'not_found'},404);
+ }catch(e){return json({ok:false,error:'storage_request_failed'},500);}
 }
 
 
