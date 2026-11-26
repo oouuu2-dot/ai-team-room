@@ -48,9 +48,17 @@ async function loadMedia(){for(const el of document.querySelectorAll('[data-medi
 async function refresh(force=false){if(polling||busy||(!force&&dirty))return;polling=true;try{const d=await api();cards=d.cards;storage=d.storage_ready;$('#storage').hidden=storage;if(!selected&&cards.length)selected=cards[0].id;drawCards();const c=cards.find(c=>c.id===selected);if(force||c?.version!==current?.version||c?.id!==current?.id){current=c||null;drawDetail();}}catch(e){status(e.message);}finally{polling=false;}}
 async function mutate(action,extra={}){const d=await api('/'+current.id,'PATCH',{action,actor:$('#actor').value,version:current.version,...extra});current=d.card;dirty=false;await refresh(true);status('저장했습니다.');}
 function sourceValues(){return current.sources.map((s,i)=>{const el=document.querySelector(`[data-source="${i}"]`);return {...s,main:document.querySelector('[name=mainSource]:checked')?.value===String(i),review:el.querySelector('[data-review]').value,quality:el.querySelector('[data-quality]').value,reason:el.querySelector('[data-reason]').value};});}
+function pendingValues(){
+ const values={note:$('#note').value};
+ if(current.stage==='source'){values.product=$('#product').value;values.sources=sourceValues();}
+ if(current.stage==='script')values.script=Object.fromEntries(['draft_kr','draft_jp','final_kr','final_jp'].map(k=>[k,$('#'+k).value]));
+ if(current.stage==='narration'){values.littly_kr=$('#littly_kr').value;values.littly_jp=$('#littly_jp').value;}
+ if(current.stage==='render')values.render_status=$('#renderStatus').value;
+ if(current.stage==='done'){values.outputs={};for(const k of ['title','description','pinned','caption','hashtags','comment','keyword'])for(const l of ['kr','jp'])values.outputs[k+'_'+l]=$('#'+k+'_'+l).value;}
+ return values;
+}
 async function action(a){if(busy)return;busy=true;status('저장 중…');try{
- if(a==='confirm_source'&&dirty)await mutate('save',{sources:sourceValues()});
- if(['submit_draft','submit_final','confirm_script'].includes(a)&&dirty)await mutate('save',{script:Object.fromEntries(['draft_kr','draft_jp','final_kr','final_jp'].map(k=>[k,$('#'+k).value]))});
+ if(dirty&&!['rewind','cancel'].includes(a)){await mutate('save',pendingValues());if(a.startsWith('save_')||a==='note')return;}
  if(a==='add_source'){const url=$('#sourceUrl').value.trim();await mutate('save',{sources:[...sourceValues(),{url,review:'pending'}]});}
  else if(a==='save_source')await mutate('save',{sources:sourceValues()});
  else if(a==='save_product')await mutate('save',{product:$('#product').value});
