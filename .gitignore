@@ -11,3 +11,6 @@ node_modules/
 .DS_Store
 *.log
 __pycache__/
+
+# bridge 감시 lockfile
+bridge/.watch.lock

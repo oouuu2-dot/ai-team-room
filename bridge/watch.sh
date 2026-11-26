@@ -101,9 +101,11 @@ while true; do
     mv "$CMD_FILE" "$DONE_DIR/${NAME}.md"
 
     # 결과 + 이동 기록을 push
-    git -C "$REPO_DIR" add bridge/results bridge/done 2>/dev/null
-    git -C "$REPO_DIR" commit -m "bridge: $NAME 실행 완료 (종료 코드 $STATUS)" --quiet 2>/dev/null
-    if ! git -C "$REPO_DIR" push --quiet 2>/dev/null; then
+    # -A: inbox에서 지운 것까지 함께 기록해야 다음 git pull --rebase가 막히지 않는다
+    git -C "$REPO_DIR" add -A bridge/inbox bridge/results bridge/done 2>/dev/null
+    if ! git -C "$REPO_DIR" commit -m "bridge: $NAME 실행 완료 (종료 코드 $STATUS)" --quiet 2>/dev/null; then
+      log "git commit 실패 — git user.name/user.email 설정을 확인하세요."
+    elif ! git -C "$REPO_DIR" push --quiet 2>/dev/null; then
       log "git push 실패 — 다음 주기에 다시 시도합니다."
     else
       log "완료: $NAME (결과: bridge/results/${NAME}.result.md)"
