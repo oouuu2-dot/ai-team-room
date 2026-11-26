@@ -536,7 +536,7 @@
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;
   }
-  var POLL_MS = 10000;
+  var POLL_MS = 5000;
   var pickleChat = new URLSearchParams(location.search).get('view') === 'pickles';
   function isPickleParticipant(name){ return name === '똑똑이' || /^피클[1-5]$/.test(name); }
   if (pickleChat) document.body.classList.add('pickle-chat');
@@ -1544,10 +1544,10 @@
       if (document.hidden) return;
       tick++;
       if (state.view === 'progress'){
-        if (tick % 5 === 0) loadChecklist().catch(function(){});
+        if (tick % 10 === 0) loadChecklist().catch(function(){});
       } else {
         loadMessages(false);
-        if (!pickleChat && tick % 5 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); loadRoomBoard(); }
+        if (!pickleChat && tick % 10 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); loadRoomBoard(); }
       }
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
