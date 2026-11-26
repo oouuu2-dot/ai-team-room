@@ -14,6 +14,10 @@ binding = "DB"
 database_name = "ai-team-room"
 database_id = "bee04f5a-f4ce-4367-972d-7f5ff20f2811"
 
+[[r2_buckets]]
+binding = "SHORTS_FILES"
+bucket_name = "ai-team-room-shorts"
+
 # 의장 봇: 10분마다 방을 확인해 답 없는 질문에 담당 AI를 부릅니다.
 [triggers]
 crons = ["*/10 * * * *"]
