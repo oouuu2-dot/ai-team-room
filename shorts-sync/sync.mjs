@@ -43,7 +43,7 @@ async function upload(card,slot,p){const st=await fs.stat(p);if(Date.now()-st.mt
 }
 async function patch(id,body){for(let attempt=0;attempt<3;attempt++){const c=(await api('/'+id)).card;try{return (await api('/'+id,'PATCH',{...body,version:c.version,actor:'PC 동기화'})).card;}catch(e){if(e.status!==409||attempt===2)throw e;}}}
 try{
- const data=await api();if(!data.storage_ready){console.log('R2 storage pending: no file transfer attempted');process.exitCode=2;}else{
+ const data=await api();if(!data.storage_ready){console.log('R2 storage pending: no file transfer attempted');}else{
  await fs.mkdir(materials,{recursive:true});await fs.mkdir(outputs,{recursive:true});
  for(let card of data.cards.filter(c=>!c.archived)){
  const folder=within(materials,`${card.id}.${safe(card.product)}`);await fs.mkdir(folder,{recursive:true});

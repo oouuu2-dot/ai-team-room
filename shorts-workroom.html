@@ -3,4 +3,5 @@
 <p id="status" role="status" aria-live="polite"></p><p id="storage" hidden>파일 저장소 연결 준비 중입니다. 카드·대본은 사용할 수 있습니다.</p>
 <div class="layout"><aside><h2>숏츠 카드</h2><div id="cards"></div></aside><main id="detail"><p>카드를 선택하거나 새로 만들어 주세요.</p></main></div>
 <dialog id="connect"><form method="dialog"><h2>회의실 연결</h2><label>회의실 API 키<input id="roomKey" type="password" autocomplete="off" required></label><button value="connect">연결</button></form></dialog>
+<dialog id="createCard"><form id="createForm"><h2>새 숏츠 카드</h2><label>제품명<input id="newProduct" maxlength="100" required></label><div class="actions"><button type="submit">카드 만들기</button><button type="button" class="subtle" id="cancelCreate">취소</button></div></form></dialog>
 <script src="/shorts-workroom.js"></script></body></html>

@@ -1161,7 +1161,7 @@ async function swMutation(env,c,b) {
   const actor=swText(b.actor||'참여자',40), action=b.action||'save';
   let notice='';
   if(action==='save') {
-    if(b.product!==undefined)c.product=swText(b.product,100);
+    if(b.product!==undefined){if(c.stage!=='source')throw swError('product_locked_after_source');c.product=swText(b.product,100);}
     if(!c.product)throw swError('product_required');
     if(b.sources!==undefined) {
       if(c.stage!=='source')throw swError('source_already_confirmed');
