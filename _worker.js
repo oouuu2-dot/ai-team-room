@@ -839,12 +839,15 @@ async function handleApi(request, env, url) {
     return json({ ok: dbOk, service: 'ai-team-room', db: dbOk, time: new Date().toISOString() });
   }
 
-  if (!authorized(request, env, url)) {
+  const mediaTicket = url.pathname.startsWith('/api/shorts-workroom/') && request.method === 'GET' && await swTicketValid(env,url);
+  if (!mediaTicket && !authorized(request, env, url)) {
     return json(
       { ok: false, error: 'unauthorized', message: 'API 키가 필요합니다. Authorization: Bearer <API_KEY>' },
       401
     );
   }
+
+  if (parts[1] === 'shorts-workroom') return shortsApi(request, env, url);
 
   if (parts[1] === 'docs' || parts[1] === 'guide') {
     if ((url.searchParams.get('format') || '') === 'json') {
@@ -1082,6 +1085,246 @@ async function handleApi(request, env, url) {
   return json({ ok: false, error: 'not_found', message: '알 수 없는 API 경로입니다. /api/docs 를 확인하세요.' }, 404);
 }
 
+// ---------- 숏츠 작업방 (shared room-key authentication; not per-user ACL) ----------
+const SW_MAX_FILE = 500 * 1024 * 1024;
+const SW_PART = 8 * 1024 * 1024;
+const SW_SLOTS = ['source','narration_kr','narration_jp','video_kr','video_jp','thumbnail_kr','thumbnail_jp','upload_notes'];
+async function ensureShorts(env) {
+  await env.DB.prepare(`create table if not exists shorts_cards (
+    id integer primary key autoincrement, version integer not null default 1,
+    data text not null, updated_at text not null)`).run();
+  await env.DB.prepare(`create table if not exists shorts_files (
+    id text primary key, card_id integer not null, slot text not null, name text not null,
+    mime text not null, size integer not null, object_key text not null,
+    upload_id text, status text not null, parts text not null default '{}', created_at text not null)`).run();
+  await env.DB.prepare(`create table if not exists shorts_events (
+    id text primary key, card_id integer not null, version integer not null, text text not null,
+    delivered integer not null default 0, lease integer not null default 0)`).run();
+  await env.DB.prepare(`create table if not exists shorts_tickets (token text primary key, file_id text not null, expires integer not null)`).run();
+}
+async function swTicketValid(env,url) {
+  const token=url.searchParams.get('ticket');if(!token||!/^[a-f0-9-]{36}$/.test(token))return false;
+  const match=url.pathname.match(/^\/api\/shorts-workroom\/(\d+)\/files\/([^/]+)$/);if(!match)return false;
+  await ensureShorts(env);
+  const row=await env.DB.prepare('select t.file_id from shorts_tickets t join shorts_files f on f.id=t.file_id where t.token=? and t.file_id=? and f.card_id=? and t.expires>?')
+    .bind(token,match[2],Number(match[1]),Date.now()).first();return !!row;
+}
+function swError(message, status=400) { return Object.assign(new Error(message), {status}); }
+function swText(value, max=20000) { return String(value ?? '').trim().slice(0,max); }
+function swInitial(product) {
+  return {product:swText(product,100), stage:'source', assignee:'뮤즈', archived:false,
+    sources:[], script:{draft_kr:'',draft_jp:'',final_kr:'',final_jp:'',confirmed:false},
+    files:{}, littly_kr:'', littly_jp:'', render_status:'대기', outputs:{}, log:[]};
+}
+function swReady(c) {
+  return ['source','narration_kr','narration_jp'].every(k=>c.files[k]?.id && c.files[k]?.synced)
+    && /^\d+$/.test(c.littly_kr) && /^\d+$/.test(c.littly_jp);
+}
+function swLog(c, actor, text) {
+  c.log.push({actor:swText(actor,40),text:swText(text,2000),at:new Date().toISOString()});
+  c.log=c.log.slice(-100);
+}
+async function swRead(env,id) {
+  const row=await env.DB.prepare('select * from shorts_cards where id=?').bind(id).first();
+  if(!row) throw swError('card_not_found',404);
+  return {...JSON.parse(row.data),id:row.id,version:row.version,updated_at:row.updated_at};
+}
+async function swFlush(env) {
+  // Durable event -> normal room message -> existing Telegram outbox.
+  // A stable marker makes retries idempotent even if the worker ends after postMessage.
+  const rows=await env.DB.prepare('select * from shorts_events where delivered=0 and lease<? order by rowid limit 10').bind(Date.now()).all();
+  for(const e of rows.results||[]) {
+    const claim=await env.DB.prepare('update shorts_events set lease=? where id=? and delivered=0 and lease<?').bind(Date.now()+120000,e.id,Date.now()).run();
+    if(!claim.meta?.changes)continue;
+    const marker=`[숏츠카드:${e.id}]`;
+    const exists=await env.DB.prepare('select id from messages where room_slug=? and content like ? limit 1').bind('shorts',`%${marker}%`).first();
+    if(!exists) await postMessage(env,'shorts',{sender:'코덱스',content:e.text+'\n'+marker});
+    await env.DB.prepare('update shorts_events set delivered=1 where id=?').bind(e.id).run();
+  }
+}
+async function swSave(env,c,expected,notice='') {
+  const id=c.id, version=expected+1, at=new Date().toISOString();
+  const data={...c}; delete data.id;delete data.version;delete data.updated_at;
+  const update=env.DB.prepare('update shorts_cards set data=?,version=?,updated_at=? where id=? and version=?')
+    .bind(JSON.stringify(data),version,at,id,expected);
+  let result;
+  if(notice) {
+    const text=`@${c.assignee} 숏츠 #${id} ${c.product}: ${notice}\nhttps://ai-team-room.oouuu2.workers.dev/shorts-workroom.html?card=${id}`;
+    const results=await env.DB.batch([update,env.DB.prepare('insert or ignore into shorts_events(id,card_id,version,text) select ?,?,?,? where changes()=1').bind(`${id}-${version}`,id,version,text)]);
+    result=results[0];
+  } else result=await update.run();
+  if(!result.meta?.changes) throw swError('version_conflict_reload',409);
+  await swFlush(env);
+  return swRead(env,id);
+}
+async function swMutation(env,c,b) {
+  const actor=swText(b.actor||'참여자',40), action=b.action||'save';
+  let notice='';
+  if(action==='save') {
+    if(b.product!==undefined)c.product=swText(b.product,100);
+    if(!c.product)throw swError('product_required');
+    if(b.sources!==undefined) {
+      if(c.stage!=='source')throw swError('source_already_confirmed');
+      if(!Array.isArray(b.sources)||b.sources.length>20)throw swError('sources_max_20');
+      c.sources=b.sources.map(s=>{
+        let u;try{u=new URL(s.url);}catch{throw swError('invalid_source_url');}
+        if(!['http:','https:'].includes(u.protocol))throw swError('invalid_source_url');
+        return {url:u.href,quality:swText(s.quality,80),review:['pass','fail','pending'].includes(s.review)?s.review:'pending',reason:swText(s.reason,1000),main:!!s.main};
+      });
+    }
+    if(b.script!==undefined) {
+      if(c.stage!=='script')throw swError('script_not_editable_at_this_stage');
+      for(const k of ['draft_kr','draft_jp','final_kr','final_jp'])if(b.script[k]!==undefined)c.script[k]=swText(b.script[k]);
+    }
+    if(b.littly_kr!==undefined||b.littly_jp!==undefined) {
+      if(!['source','script','narration'].includes(c.stage))throw swError('numbers_locked_for_render');
+      for(const k of ['littly_kr','littly_jp'])if(b[k]!==undefined){c[k]=swText(b[k],10);if(c[k]&&!/^\d+$/.test(c[k]))throw swError('invalid_littly_number');}
+    }
+    if(b.outputs!==undefined) {
+      for(const k of ['title_kr','title_jp','description_kr','description_jp','pinned_kr','pinned_jp','caption_kr','caption_jp','hashtags_kr','hashtags_jp','comment_kr','comment_jp','keyword_kr','keyword_jp'])if(b.outputs[k]!==undefined)c.outputs[k]=swText(b.outputs[k]);
+    }
+    if(b.render_status!==undefined) {
+      if(c.stage!=='render'||!['대기','렌더 중','검수 중'].includes(b.render_status))throw swError('invalid_render_status');
+      c.render_status=b.render_status;
+    }
+    if(b.note)swLog(c,actor,b.note);
+  } else if(action==='confirm_source') {
+    if(c.stage!=='source'||c.sources.filter(s=>s.main&&s.review==='pass').length!==1)throw swError('one_passed_main_source_required');
+    c.stage='script';c.assignee='피클3';notice='소스 확정 · 대본 초안 차례';
+  } else if(action==='submit_draft') {
+    if(c.stage!=='script'||!c.script.draft_kr||!c.script.draft_jp)throw swError('both_drafts_required');
+    c.assignee='클로드';notice='한·일 대본 초안 저장 · 검수 차례';
+  } else if(action==='submit_final') {
+    if(c.stage!=='script'||!c.script.final_kr||!c.script.final_jp)throw swError('both_final_scripts_required');
+    c.assignee='똑똑이';notice='한·일 최종 대본 · 확정 후 녹음해 주세요';
+  } else if(action==='confirm_script') {
+    if(c.stage!=='script'||!c.script.final_kr||!c.script.final_jp)throw swError('both_final_scripts_required');
+    c.script.confirmed=true;c.stage='narration';c.assignee='똑똑이';notice='대본 확정 · 나레이션 한·일과 소스 파일을 올려 주세요';
+  } else if(action==='pc_synced') {
+    for(const k of ['source','narration_kr','narration_jp'])if(b.files?.[k] && c.files[k]?.id===b.files[k].id){
+      c.files[k].synced=true;c.files[k].pc_path=swText(b.files[k].path,500);
+    }
+    if(b.script_version===c.script.final_kr+'\n'+c.script.final_jp)c.script.pc_synced=true;
+  } else if(action==='complete_render') {
+    if(c.stage!=='render'||!c.files.video_kr?.id||!c.files.video_jp?.id)throw swError('both_finished_videos_required');
+    c.stage='done';c.assignee='똑똑이';c.render_status='완료';notice='한·일 완성본 도착 · 미리보기 확인';
+  } else if(action==='archive') {
+    if(c.stage!=='done')throw swError('not_finished');c.archived=true;notice='업로드 완료로 보관';
+  } else if(action==='rewind') {
+    const stages=['source','script','narration','render','done'],i=stages.indexOf(c.stage);
+    if(i<=0)throw swError('already_first_stage');
+    c.stage=stages[i-1];c.archived=false;
+    c.assignee={source:'뮤즈',script:'클로드',narration:'똑똑이',render:'클로드'}[c.stage];
+    if(i<=2){c.script.confirmed=false;c.script.pc_synced=false;}
+    // Prevent old sync flags / old results from silently advancing a revised card.
+    if(c.stage==='narration')for(const f of Object.values(c.files))f.synced=false;
+    if(i<=4){delete c.files.video_kr;delete c.files.video_jp;}
+    notice='이전 단계로 되돌림 · '+swText(b.note||'수정 요청',500);
+  } else throw swError('unknown_action');
+  if(c.stage==='narration'&&c.script.confirmed&&c.script.pc_synced&&swReady(c)) {
+    c.stage='render';c.assignee='클로드';c.render_status='대기';notice='재료·대본 PC 저장 완료 · 렌더 차례';
+  }
+  swLog(c,actor,action);
+  return swSave(env,c,b.version,notice);
+}
+async function shortsApi(request,env,url) {
+  try {
+    await ensureShorts(env);
+    const p=url.pathname.split('/').filter(Boolean).slice(2), method=request.method;
+    if(!p.length&&method==='GET') {
+      let cards=(await env.DB.prepare('select * from shorts_cards order by id desc limit 200').all()).results.map(r=>({...JSON.parse(r.data),id:r.id,version:r.version,updated_at:r.updated_at}));
+      for(const k of ['stage','assignee'])if(url.searchParams.has(k))cards=cards.filter(c=>c[k]===url.searchParams.get(k));
+      await swFlush(env);
+      return json({ok:true,cards,storage_ready:!!env.SHORTS_FILES,max_file_size:SW_MAX_FILE,part_size:SW_PART});
+    }
+    if(!p.length&&method==='POST') {
+      const b=await request.json(),c=swInitial(b.product);
+      if(!c.product)throw swError('product_required');swLog(c,b.actor||'뮤즈','카드 생성');
+      const r=await env.DB.prepare('insert into shorts_cards(data,updated_at) values(?,?)').bind(JSON.stringify(c),new Date().toISOString()).run();
+      return json({ok:true,card:await swRead(env,r.meta.last_row_id)},201);
+    }
+    const id=Number(p[0]);if(!Number.isSafeInteger(id)||id<1)throw swError('invalid_card_id');
+    const c=await swRead(env,id);
+    if(p.length===1&&method==='GET')return json({ok:true,card:c});
+    if(p.length===1&&method==='PATCH') {
+      const b=await request.json();if(b.version!==c.version)throw swError('version_conflict_reload',409);
+      return json({ok:true,card:await swMutation(env,c,b)});
+    }
+    if(p[1]!=='files')throw swError('not_found',404);
+    if(!env.SHORTS_FILES)throw swError('R2_binding_SHORTS_FILES_required',503);
+    if(p.length===2&&method==='POST') {
+      const b=await request.json();
+      if(!SW_SLOTS.includes(b.slot)||!Number.isSafeInteger(b.size)||b.size<1||b.size>SW_MAX_FILE)throw swError('invalid_slot_or_size');
+      if(['source','narration_kr','narration_jp'].includes(b.slot)&&!['source','script','narration'].includes(c.stage))throw swError('rewind_before_replacing_material',409);
+      if(!['source','narration_kr','narration_jp'].includes(b.slot)&&!['render','done'].includes(c.stage))throw swError('output_requires_render_stage',409);
+      const fid=crypto.randomUUID(), key=`cards/${id}/${fid}`,name=swText(b.name,180).replace(/[\\/\x00-\x1f]/g,'_'),mime=swText(b.mime||'application/octet-stream',100);
+      const validMime=b.slot==='source'||b.slot.startsWith('video_')?['video/mp4','video/webm','video/quicktime']:b.slot.startsWith('narration_')?['audio/mpeg','audio/mp3','audio/wav','audio/x-wav','audio/mp4','audio/aac','audio/ogg','audio/webm']:b.slot.startsWith('thumbnail_')?['image/png','image/jpeg','image/webp']:['text/plain'];
+      if(!validMime.includes(mime))throw swError('unsupported_file_type');
+      const upload=await env.SHORTS_FILES.createMultipartUpload(key,{httpMetadata:{contentType:mime}});
+      await env.DB.prepare('insert into shorts_files(id,card_id,slot,name,mime,size,object_key,upload_id,status,created_at) values(?,?,?,?,?,?,?,?,?,?)')
+        .bind(fid,id,b.slot,name,mime,b.size,key,upload.uploadId,'uploading',new Date().toISOString()).run();
+      return json({ok:true,id:fid,part_size:SW_PART},201);
+    }
+    const f=await env.DB.prepare('select * from shorts_files where id=? and card_id=?').bind(p[2]||'',id).first();
+    if(!f)throw swError('file_not_found',404);
+    if(p[3]==='ticket'&&method==='POST') {
+      if(f.status!=='ready')throw swError('file_not_ready',409);
+      const token=crypto.randomUUID();
+      await env.DB.prepare('delete from shorts_tickets where expires<?').bind(Date.now()).run();
+      await env.DB.prepare('insert into shorts_tickets(token,file_id,expires) values(?,?,?)').bind(token,f.id,Date.now()+30*60000).run();
+      return json({ok:true,url:`/api/shorts-workroom/${id}/files/${f.id}?ticket=${token}`,expires_in:1800});
+    }
+    if(p.length===3&&method==='GET') {
+      if(f.status!=='ready')throw swError('file_not_ready',409);
+      const range=request.headers.get('range');
+      if(range&&!/^bytes=\d*-\d*$/.test(range))throw swError('invalid_range',416);
+      const obj=await env.SHORTS_FILES.get(f.object_key,range?{range:request.headers}:undefined);
+      if(!obj)throw swError('object_not_found',404);
+      const headers=new Headers({...CORS,'content-type':f.mime,'cache-control':'private, no-store','accept-ranges':'bytes','x-content-type-options':'nosniff',
+        'content-disposition':`${/^(video\/|audio\/|image\/)/.test(f.mime)?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`});
+      headers.set('etag',obj.httpEtag);
+      if(obj.range) {const offset=obj.range.offset??Math.max(0,f.size-obj.range.suffix),length=obj.range.length??obj.range.suffix;headers.set('content-range',`bytes ${offset}-${offset+length-1}/${f.size}`);headers.set('content-length',String(length));}
+      else headers.set('content-length',String(obj.size));
+      return new Response(obj.body,{status:obj.range?206:200,headers});
+    }
+    if(p[3]==='part'&&method==='POST') {
+      if(f.status!=='uploading')throw swError('upload_not_open',409);
+      const n=Number(url.searchParams.get('number')),total=Math.ceil(f.size/SW_PART);
+      if(!Number.isInteger(n)||n<1||n>total)throw swError('invalid_part');
+      const expected=n===total?f.size-SW_PART*(n-1):SW_PART;
+      const reader=request.body?.getReader();if(!reader)throw swError('empty_part');
+      const chunks=[];let received=0;
+      for(;;){const {done,value}=await reader.read();if(done)break;received+=value.byteLength;if(received>expected){await reader.cancel();throw swError('part_size_mismatch');}chunks.push(value);}
+      const bytes=new Uint8Array(received);let pos=0;for(const chunk of chunks){bytes.set(chunk,pos);pos+=chunk.byteLength;}
+      if(bytes.byteLength!==expected)throw swError('part_size_mismatch');
+      const upload=env.SHORTS_FILES.resumeMultipartUpload(f.object_key,f.upload_id);
+      const part=await upload.uploadPart(n,bytes);
+      // Sequential upload clients; each part updates its JSON path atomically.
+      await env.DB.prepare("update shorts_files set parts=json_set(parts, ?, ?) where id=?").bind(`$.\"${n}\"`,part.etag,f.id).run();
+      return json({ok:true,part:n});
+    }
+    if(p[3]==='complete'&&method==='POST') {
+      if(f.status==='uploading') {
+        const parts=JSON.parse(f.parts),total=Math.ceil(f.size/SW_PART);
+        if(Object.keys(parts).length!==total)throw swError('missing_parts');
+        await env.SHORTS_FILES.resumeMultipartUpload(f.object_key,f.upload_id).complete(Array.from({length:total},(_,i)=>({partNumber:i+1,etag:parts[i+1]})));
+        const head=await env.SHORTS_FILES.head(f.object_key);if(!head||head.size!==f.size)throw swError('uploaded_size_mismatch',409);
+        await env.DB.prepare("update shorts_files set status='ready' where id=?").bind(f.id).run();
+      }
+      const fresh=await swRead(env,id);
+      if(fresh.files[f.slot]?.id===f.id)return json({ok:true,card:fresh});
+      if(['source','narration_kr','narration_jp'].includes(f.slot)&&!['source','script','narration'].includes(fresh.stage))throw swError('rewind_before_replacing_material',409);
+      fresh.files[f.slot]={id:f.id,name:f.name,mime:f.mime,size:f.size,url:`/api/shorts-workroom/${id}/files/${f.id}`,synced:false};
+      let notice='';
+      if(f.slot.startsWith('video_')&&fresh.stage==='done'){fresh.stage='render';fresh.assignee='클로드';fresh.render_status='검수 중';fresh.archived=false;notice='완성본 교체 · 다시 검수해 주세요';}
+      swLog(fresh,'파일 업로드',f.slot+': '+f.name);
+      return json({ok:true,card:await swSave(env,fresh,fresh.version,notice)});
+    }
+    throw swError('not_found',404);
+  }catch(e){if(e.status)return json({ok:false,error:e.message},e.status);throw e;}
+}
+
+
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(
@@ -1098,7 +1341,7 @@ export default {
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       try {
         const response = await handleApi(request, env, url);
-        if (request.method === 'POST') ctx?.waitUntil(flushTelegram(env));
+        if (['POST','PATCH'].includes(request.method)) ctx?.waitUntil(flushTelegram(env));
         return response;
       } catch (err) {
         return json(

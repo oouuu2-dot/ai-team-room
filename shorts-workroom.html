@@ -1,0 +1,6 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>숏츠 작업방</title><link rel="stylesheet" href="/shorts-workroom.css"></head><body>
+<header><div><small>AI 팀 회의실 · <a href="/?room=shorts">숏츠 대화방</a></small><h1>오늘 <em>숏츠</em> 작업방</h1></div><div class="tools"><strong id="turn">연결 중</strong><select id="actor" aria-label="작업자"><option>똑똑이</option><option>뮤즈</option><option>피클3</option><option>피클1</option><option>피클2</option><option>피클4</option><option>피클5</option><option>클로드</option><option>코덱스</option></select><button id="new">+ 새 숏츠 카드</button><button id="keyBtn" class="subtle">연결 설정</button></div></header>
+<p id="status" role="status" aria-live="polite"></p><p id="storage" hidden>파일 저장소 연결 준비 중입니다. 카드·대본은 사용할 수 있습니다.</p>
+<div class="layout"><aside><h2>숏츠 카드</h2><div id="cards"></div></aside><main id="detail"><p>카드를 선택하거나 새로 만들어 주세요.</p></main></div>
+<dialog id="connect"><form method="dialog"><h2>회의실 연결</h2><label>회의실 API 키<input id="roomKey" type="password" autocomplete="off" required></label><button value="connect">연결</button></form></dialog>
+<script src="/shorts-workroom.js"></script></body></html>

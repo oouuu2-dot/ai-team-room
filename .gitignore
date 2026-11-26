@@ -11,6 +11,10 @@ node_modules/
 .DS_Store
 *.log
 __pycache__/
+shorts-sync/config.json
+shorts-sync/room-key.dpapi
+shorts-sync/sync-state.json
+shorts-sync/sync.lock
 
 # bridge 감시 lockfile
 bridge/.watch.lock
