@@ -59,6 +59,7 @@ async function action(a){if(busy)return;busy=true;status('저장 중…');try{
  else if(a==='save_render')await mutate('save',{render_status:$('#renderStatus').value});
  else if(a==='save_outputs'){const values={};for(const k of ['title','description','pinned','caption','hashtags','comment','keyword'])for(const l of ['kr','jp'])values[k+'_'+l]=$('#'+k+'_'+l).value;await mutate('save',{outputs:values});}
  else if(a==='note')await mutate('save',{note:$('#note').value});
+ else if(a==='cancel'){if(confirm('완료 처리 없이 이 카드를 보관할까요?'))await mutate(a,{note:$('#note').value});}
  else if(a==='rewind'){if(confirm('이전 단계로 돌아가 수정할까요?'))await mutate(a,{note:$('#note').value});}
  else await mutate(a);
  }catch(e){status(e.message==='version_conflict_reload'?'다른 담당자가 수정했습니다. 작성 내용을 복사해 둔 뒤 새로고침해 주세요.':e.message);}finally{busy=false;if(!dirty)await refresh(true);}}

@@ -1210,6 +1210,8 @@ async function swMutation(env,c,b) {
     c.stage='done';c.assignee='똑똑이';c.render_status='완료';notice='한·일 완성본 도착 · 미리보기 확인';
   } else if(action==='archive') {
     if(c.stage!=='done')throw swError('not_finished');c.archived=true;notice='업로드 완료로 보관';
+  } else if(action==='cancel') {
+    c.archived=true;swLog(c,actor,'제작 취소/검증용 카드 보관 (완료 처리 아님)');
   } else if(action==='rewind') {
     const stages=['source','script','narration','render','done'],i=stages.indexOf(c.stage);
     if(i<=0)throw swError('already_first_stage');
