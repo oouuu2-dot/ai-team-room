@@ -847,7 +847,10 @@ async function handleApi(request, env, url) {
     );
   }
 
-  if (parts[1] === 'shorts-workroom') return shortsApi(request, env, url);
+  if (parts[1] === 'shorts-workroom') {
+    if (method !== 'GET') return json({ok:false,error:'workroom_moved_to_office',target:'https://oouuu2.pythonanywhere.com/',message:'카드 작업은 현주 AI 오피스의 숏츠작업실에서 진행합니다. 기존 데이터는 보존됩니다.'},410);
+    return shortsApi(request, env, url);
+  }
 
   if (parts[1] === 'docs' || parts[1] === 'guide') {
     if ((url.searchParams.get('format') || '') === 'json') {

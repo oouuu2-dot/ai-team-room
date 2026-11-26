@@ -11,8 +11,8 @@ function fixture(storage=true){
  const objects=new Map(),uploads=new Map();let n=0;
  const R2={async createMultipartUpload(key){const uploadId=String(++n);uploads.set(uploadId,{key,parts:new Map()});return {uploadId};},resumeMultipartUpload(key,id){const u=uploads.get(id);assert.equal(u.key,key);return {async uploadPart(number,bytes){u.parts.set(number,new Uint8Array(bytes));return {partNumber:number,etag:'etag'+number};},async complete(parts){const b=Buffer.concat(parts.map(p=>Buffer.from(u.parts.get(p.partNumber))));objects.set(key,b);return {size:b.length};}};},async head(key){const b=objects.get(key);return b?{size:b.length}:null;},async get(key,options){const b=objects.get(key);if(!b)return null;let body=b,range;if(options?.range){const match=options.range.get('range').match(/bytes=(\d+)-(\d*)/);const offset=Number(match[1]),end=match[2]?Math.min(Number(match[2]),b.length-1):b.length-1;range={offset,length:end-offset+1};body=b.subarray(offset,end+1);}return {body,size:b.length,httpEtag:'"etag"',range};}};
  const env={DB,ROOM_KEY:'test',...(storage?{SHORTS_FILES:R2}:{})};
- const api=runInNewContext(src.replace('export default {','const worker = {')+'\n({handleApi,swRead,swSave,swTicketValid})',{Request,Response,Headers,URL,console,crypto:webcrypto,Uint8Array});
- async function call(route='',method='GET',body,auth=true,headers={}){const req=new Request('https://test/api/shorts-workroom'+route,{method,headers:{...(auth?{Authorization:'Bearer test'}:{}),...headers},body:body===undefined?undefined:body instanceof Uint8Array?body:JSON.stringify(body)});const r=await api.handleApi(req,env,new URL(req.url));return {status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():await r.arrayBuffer(),headers:r.headers};}
+ const api=runInNewContext(src.replace('export default {','const worker = {')+'\n({handleApi,shortsApi,swRead,swSave,swTicketValid})',{Request,Response,Headers,URL,console,crypto:webcrypto,Uint8Array});
+ async function call(route='',method='GET',body,auth=true,headers={}){const req=new Request('https://test/api/shorts-workroom'+route,{method,headers:{...(auth?{Authorization:'Bearer test'}:{}),...headers},body:body===undefined?undefined:body instanceof Uint8Array?body:JSON.stringify(body)});const handler=auth&&method!=='GET'?api.shortsApi:api.handleApi;const r=await handler(req,env,new URL(req.url));return {status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():await r.arrayBuffer(),headers:r.headers};}
  return {db,env,api,call};
 }
 async function create(f){const r=await f.call('','POST',{product:'시험 제품',actor:'뮤즈'});assert.equal(r.status,201);return r.data.card;}
@@ -64,4 +64,11 @@ test('multipart bytes, size limits, retry, scoped expiring media tickets and ran
  f.db.prepare('update shorts_tickets set expires=0').run();assert.equal((await f.call(`/${c.id}/files/${id}?${ticket}`,'GET',undefined,false)).status,401);f.db.close();
 });
 test('missing R2 is explicit and does not claim upload success',async()=>{const f=fixture(false),c=await create(f);assert.equal((await f.call()).data.storage_ready,false);assert.equal((await f.call(`/${c.id}/files`,'POST',{})).status,503);f.db.close();});
+test('public legacy mutations stop before database access after move to office',async()=>{
+ const f=fixture();
+ const req=new Request('https://test/api/shorts-workroom',{method:'POST',headers:{Authorization:'Bearer test'},body:JSON.stringify({product:'must not create'})});
+ const response=await f.api.handleApi(req,f.env,new URL(req.url));
+ assert.equal(response.status,410);assert.equal((await response.json()).target,'https://oouuu2.pythonanywhere.com/');
+ assert.equal(f.db.prepare("select count(*) n from sqlite_master where name='shorts_cards'").get().n,0);f.db.close();
+});
 
