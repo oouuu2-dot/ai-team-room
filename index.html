@@ -542,7 +542,7 @@
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;
   }
-  var CLIENT_BUILD = '20261128-manual-checklist-1';
+  var CLIENT_BUILD = '20261128-manual-checklist-2';
   var POLL_MS = 5000;
   var pickleChat = new URLSearchParams(location.search).get('view') === 'pickles';
   function isPickleParticipant(name){ return name === '똑똑이' || /^피클[1-5]$/.test(name); }
@@ -783,7 +783,7 @@
       checkVersion();
       renderRooms();
       var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
-      if (cur){
+      if (cur && state.view === 'room'){
         $('roomName').textContent = cur.name;
         $('roomDesc').textContent = cur.description || '';
       }

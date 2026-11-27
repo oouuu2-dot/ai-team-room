@@ -5,7 +5,7 @@
  * 인증: Authorization: Bearer <ROOM_KEY 또는 API_KEY>  (또는 X-Room-Key 헤더, ?key= 쿼리)
  */
 
-const UI_BUILD = '20261128-manual-checklist-1';
+const UI_BUILD = '20261128-manual-checklist-2';
 const MC_DATA = {"categories": ["살림숏츠", "릴스 (하하·지비·유닉)", "카드뉴스 (하하·지비·유닉)", "블로그 (네이버·구글)", "키워드추출", "스레드"], "daily": [["shorts", 0, "숏츠 진행 확인"], ["reels", 1, "하하·지비·유닉 릴스 발행·예약 확인"], ["cards", 2, "하하·지비 카드뉴스 발행·예약 확인"], ["blog", 3, "네이버·구글 임시저장 유지 확인 (구글 최소 5개)"], ["keyword", 4, "애플파이 3개 순위 확인"], ["threads", 5, "드레쓰 발행 확인"]], "dated": {"2026-11-28": [["sealing5", 0, "실링홈 #5 대본 확인 (피클4)"], ["storage_render", 0, "수납 정리함 렌더 확인 (클로드)"], ["office_buttons", 0, "오피스 버튼 작업 확인 (코덱스)"], ["zivi_first", 1, "지비 11/28 첫 편 업로드 (똑똑이님 직접)"], ["honeypick", 3, "허니픽 #1672 확인"], ["christmas_v2", 3, "크리스마스 사진 v2 임시저장"], ["dec6", 3, "12/06 일정 이동"], ["wall_photos", 3, "단열벽지 사진 4개 확인"], ["zoo_revision", 3, "동물원 수정 반영"], ["keyword_guide", 4, "키워드추출방 사용법 추가 확인 (코덱스)"], ["keyword_file", 4, "키워드추출 실제 파일 확인"]]}};
 // ---------- 참여자(역할) 목록 ----------
 // 이름을 바꾸려면 여기와 index.html 의 SENDERS 배열을 함께 바꾸세요.
