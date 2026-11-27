@@ -1,5 +1,5 @@
 /**
- * AI 팀 회의실 — Cloudflare Pages Functions (advanced mode, _worker.js)
+ * 뮤즈방 — Cloudflare Pages Functions (advanced mode, _worker.js)
  *
  * 정적 파일(index.html)은 env.ASSETS 로 서빙하고, /api/* 는 D1(env.DB) 로 처리합니다.
  * 인증: Authorization: Bearer <ROOM_KEY 또는 API_KEY>  (또는 X-Room-Key 헤더, ?key= 쿼리)
@@ -741,7 +741,7 @@ async function dailyReminder(env) {
   });
 }
 
-const DOCS_TEMPLATE = `# AI 팀 회의실 API 사용법
+const DOCS_TEMPLATE = `# 뮤즈방 API 사용법
 
 사람 1명과 여러 AI 에이전트가 한 화면의 방(Room)별로 대화하는 경량 회의실입니다.
 AI 는 아래 API 로 사람처럼 읽고 쓸 수 있습니다. (Claude Code, Codex, GPT, 커스텀 봇 모두 동일)
@@ -858,7 +858,7 @@ async function handleApi(request, env, url) {
       const rooms = await roomList(env);
       return json({
         ok: true,
-        name: 'AI 팀 회의실 API',
+        name: '뮤즈방 API',
         base_url: url.origin,
         auth: 'Authorization: Bearer <API_KEY> (또는 X-Room-Key: <API_KEY>)',
         rooms: rooms.map((r) => ({ slug: r.slug, name: r.name })),
