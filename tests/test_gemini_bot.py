@@ -66,5 +66,17 @@ class BridgeTests(unittest.TestCase):
                 bot.run(bot.load_state(),'test-room','test-google')
         self.assertTrue(bot.STATE_PATH.exists())
 
+    def test_service_failure_uses_only_validated_supported_fallback(self):
+        class Response:
+            def __init__(self,status):
+                self.status_code=status
+                self.ok=status==200
+            def json(self):
+                return {'candidates':[{'content':{'parts':[{'text':'연결 확인'}]}}]}
+        with patch.object(bot,'AVAILABLE_MODELS',{bot.FALLBACK_MODEL}),patch.object(bot.requests,'post',side_effect=[Response(503),Response(200)]) as post:
+            self.assertEqual(bot.gemini_reply('secret','general','뮤즈','@Gemini 확인'),'연결 확인')
+            self.assertIn(bot.FALLBACK_MODEL,post.call_args.args[0])
+            self.assertEqual(post.call_count,2)
+
 if __name__=='__main__':
     unittest.main()

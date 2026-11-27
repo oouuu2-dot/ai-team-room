@@ -9,6 +9,8 @@ import requests
 ROOM_BASE = "https://ai-team-room.oouuu2.workers.dev"
 ROOMS = ["general", "orders", "instagram", "blog", "store", "threads", "to-me"]
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+FALLBACK_MODEL = "gemini-3.6-flash"
+AVAILABLE_MODELS = set()
 STATE_PATH = Path(os.environ.get("GEMINI_STATE_PATH", ".gemini-state.json"))
 INITIAL_AFTER = int(os.environ.get("GEMINI_INITIAL_AFTER", "1400"))
 MAX_REPLIES_PER_RUN = 3
@@ -56,11 +58,14 @@ def room_post(slug, key, content, reply_to_id):
         raise BridgeError("room post network error") from None
 
 def validate_model(api_key):
+    global AVAILABLE_MODELS
+    AVAILABLE_MODELS = set()
     try:
         url, found = "https://generativelanguage.googleapis.com/v1beta/models", False
         params = {"pageSize": 100}
         for _ in range(10):
             data = checked(requests.get(url, params=params, headers={"x-goog-api-key": api_key}, timeout=30), "Gemini model list")
+            AVAILABLE_MODELS.update(m.get("name", "").removeprefix("models/") for m in data.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", []))
             found = found or any(m.get("name") == "models/" + MODEL and "generateContent" in m.get("supportedGenerationMethods", []) for m in data.get("models", []))
             if not data.get("nextPageToken"):
                 break
@@ -72,11 +77,17 @@ def validate_model(api_key):
 
 def gemini_reply(api_key, room, sender, content):
     try:
-        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent",
+        models = [MODEL] + ([FALLBACK_MODEL] if FALLBACK_MODEL != MODEL and FALLBACK_MODEL in AVAILABLE_MODELS else [])
+        for model in models:
+            r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             headers={"x-goog-api-key": api_key}, timeout=60,
             json={"systemInstruction": {"parts": [{"text": SYSTEM}]},
                   "contents": [{"role": "user", "parts": [{"text": f"방: {room}\n발신자: {sender}\n메시지:\n{content}"}]}],
                   "generationConfig": {"maxOutputTokens": 600, "temperature": 0.4}})
+            if r.status_code in (404, 500, 502, 503, 504) and model != models[-1]:
+                print("Gemini primary unavailable; trying validated supported fallback")
+                continue
+            break
         data = checked(r, "Gemini generate")
         candidates = data.get("candidates", [])
         answer = "\n".join(p.get("text", "") for p in (candidates[0].get("content", {}).get("parts", []) if candidates else [])).strip()
