@@ -83,14 +83,16 @@ def gemini_reply(api_key, room, sender, content):
             headers={"x-goog-api-key": api_key}, timeout=60,
             json={"systemInstruction": {"parts": [{"text": SYSTEM}]},
                   "contents": [{"role": "user", "parts": [{"text": f"방: {room}\n발신자: {sender}\n메시지:\n{content}"}]}],
-                  "generationConfig": {"maxOutputTokens": 600, "temperature": 0.4}})
+                  "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.4}})
             if r.status_code in (404, 500, 502, 503, 504) and model != models[-1]:
                 print("Gemini primary unavailable; trying validated supported fallback")
                 continue
             break
         data = checked(r, "Gemini generate")
         candidates = data.get("candidates", [])
-        answer = "\n".join(p.get("text", "") for p in (candidates[0].get("content", {}).get("parts", []) if candidates else [])).strip()
+        if candidates and candidates[0].get('finishReason') not in (None, 'STOP'):
+            raise BridgeError('Gemini response incomplete or blocked; retained for retry')
+        answer = "\n".join(p.get("text", "") for p in (candidates[0].get("content", {}).get("parts", []) if candidates else []) if not p.get('thought')).strip()
         if not answer:
             raise BridgeError("Gemini empty or blocked response")
         # Never post either credential even if untrusted input induces an echo.

@@ -78,5 +78,15 @@ class BridgeTests(unittest.TestCase):
             self.assertIn(bot.FALLBACK_MODEL,post.call_args.args[0])
             self.assertEqual(post.call_count,2)
 
+    def test_incomplete_output_is_not_published_as_a_finished_answer(self):
+        class Response:
+            status_code=200
+            ok=True
+            def json(self):
+                return {'candidates':[{'finishReason':'MAX_TOKENS','content':{'parts':[{'text':'문장이 잘린'}]}}]}
+        with patch.object(bot.requests,'post',return_value=Response()):
+            with self.assertRaisesRegex(bot.BridgeError,'incomplete'):
+                bot.gemini_reply('secret','general','뮤즈','@Gemini 확인')
+
 if __name__=='__main__':
     unittest.main()
