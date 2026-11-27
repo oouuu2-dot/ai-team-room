@@ -8,7 +8,7 @@ import requests
 
 ROOM_BASE = "https://ai-team-room.oouuu2.workers.dev"
 ROOMS = ["general", "orders", "instagram", "blog", "store", "threads", "to-me"]
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 STATE_PATH = Path(os.environ.get("GEMINI_STATE_PATH", ".gemini-state.json"))
 INITIAL_AFTER = int(os.environ.get("GEMINI_INITIAL_AFTER", "1400"))
 MAX_REPLIES_PER_RUN = 3

@@ -37,7 +37,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ROOM_KEY: ${{ secrets.ROOM_KEY }}
-          GEMINI_MODEL: gemini-2.5-flash-lite
+          GEMINI_MODEL: gemini-3.8-flash
           GEMINI_INITIAL_AFTER: '1400'
       - name: Preserve pending calls even after API errors
         if: always() && hashFiles('.gemini-state.json') != ''
