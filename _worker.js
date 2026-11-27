@@ -5,7 +5,8 @@
  * 인증: Authorization: Bearer <ROOM_KEY 또는 API_KEY>  (또는 X-Room-Key 헤더, ?key= 쿼리)
  */
 
-const UI_BUILD = '20261127-notifications-1';
+const UI_BUILD = '20261128-manual-checklist-1';
+const MC_DATA = {"categories": ["살림숏츠", "릴스 (하하·지비·유닉)", "카드뉴스 (하하·지비·유닉)", "블로그 (네이버·구글)", "키워드추출", "스레드"], "daily": [["shorts", 0, "숏츠 진행 확인"], ["reels", 1, "하하·지비·유닉 릴스 발행·예약 확인"], ["cards", 2, "하하·지비 카드뉴스 발행·예약 확인"], ["blog", 3, "네이버·구글 임시저장 유지 확인 (구글 최소 5개)"], ["keyword", 4, "애플파이 3개 순위 확인"], ["threads", 5, "드레쓰 발행 확인"]], "dated": {"2026-11-28": [["sealing5", 0, "실링홈 #5 대본 확인 (피클4)"], ["storage_render", 0, "수납 정리함 렌더 확인 (클로드)"], ["office_buttons", 0, "오피스 버튼 작업 확인 (코덱스)"], ["zivi_first", 1, "지비 11/28 첫 편 업로드 (똑똑이님 직접)"], ["honeypick", 3, "허니픽 #1672 확인"], ["christmas_v2", 3, "크리스마스 사진 v2 임시저장"], ["dec6", 3, "12/06 일정 이동"], ["wall_photos", 3, "단열벽지 사진 4개 확인"], ["zoo_revision", 3, "동물원 수정 반영"], ["keyword_guide", 4, "키워드추출방 사용법 추가 확인 (코덱스)"], ["keyword_file", 4, "키워드추출 실제 파일 확인"]]}};
 // ---------- 참여자(역할) 목록 ----------
 // 이름을 바꾸려면 여기와 index.html 의 SENDERS 배열을 함께 바꾸세요.
 const AGENTS = {
@@ -857,6 +858,33 @@ async function notificationSnapshot(env, room, ids) {
   return {ok:true, actors, requests};
 }
 
+function manualDay(value) {
+  const selected = value || new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+  if (typeof selected !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(selected) || Number.isNaN(Date.parse(selected+'T00:00:00Z')) || new Date(selected+'T00:00:00Z').toISOString().slice(0,10)!==selected) throw Error('날짜를 확인해 주세요.');
+  return selected;
+}
+async function manualSnapshot(env,day) {
+  const saved=await env.DB.prepare('select * from owner_manual_checks where day=?').bind(day).all();
+  const sections=[['daily','매일 할 일',MC_DATA.daily],['today','오늘 할 일',MC_DATA.dated[day]||[]]].map(([scope,label,items])=>({scope,label,items:items.map(([id,category,title])=>{
+    const state=(saved.results||[]).find(r=>r.scope===scope&&r.item===id);
+    return {id,category,title,done:!!state?.done,version:state?.version||0};
+  })}));
+  return {ok:true,date:day,categories:MC_DATA.categories,sections};
+}
+async function manualChecklist(request,env,url) {
+  await env.DB.prepare('create table if not exists owner_manual_checks(day text not null,scope text not null,item text not null,done integer not null default 0,version integer not null default 0,updated_at text,primary key(day,scope,item))').run();
+  try {
+    if(request.method==='GET')return json(await manualSnapshot(env,manualDay(url.searchParams.get('date'))));
+    if(request.method!=='PATCH')return json({ok:false,message:'지원하지 않는 요청입니다.'},405);
+    const b=await request.json(),day=manualDay(b.date),list=b.scope==='daily'?MC_DATA.daily:b.scope==='today'?(MC_DATA.dated[day]||[]):[];
+    if(!list.some(i=>i[0]===b.id)||typeof b.done!=='boolean'||!Number.isInteger(b.version)||b.version<0)throw Error('할 일과 체크 상태를 확인해 주세요.');
+    await env.DB.prepare('insert or ignore into owner_manual_checks(day,scope,item) values(?,?,?)').bind(day,b.scope,b.id).run();
+    const result=await env.DB.prepare('update owner_manual_checks set done=?,version=version+1,updated_at=? where day=? and scope=? and item=? and version=?').bind(b.done?1:0,new Date().toISOString(),day,b.scope,b.id,b.version).run();
+    if(!(result.meta?.changes ?? result.changes))return json({ok:false,message:'다른 화면에서 바뀌었습니다. 새로고침 후 확인해 주세요.'},409);
+    return json(await manualSnapshot(env,day));
+  }catch(e){return json({ok:false,message:e instanceof SyntaxError?'요청 형식을 확인해 주세요.':e.message},400);}
+}
+
 async function handleApi(request, env, url) {
   const parts = url.pathname.split('/').filter(Boolean); // ['api', ...]
   const method = request.method.toUpperCase();
@@ -883,6 +911,7 @@ async function handleApi(request, env, url) {
     );
   }
 
+  if (parts[1] === 'manual-checklist') return manualChecklist(request,env,url);
   if (parts[1] === 'notifications' && method === 'GET') {
     const room = url.searchParams.get('room') || 'general';
     const raw = url.searchParams.get('ids') || '';

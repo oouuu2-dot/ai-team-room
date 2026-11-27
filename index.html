@@ -459,6 +459,7 @@
     <nav class="notification-tabs" id="notificationTabs" aria-label="방별 새 글"></nav>
     <details class="bot-activity"><summary>봇 마지막 메시지 시각</summary><div class="actor-times" id="actorTimes">불러오는 중…</div></details>
     <section class="room-dashboard" id="roomDashboard" aria-label="방 작업 현황" hidden></section>
+    <section id="manualChecklistView" hidden style="flex:1;min-height:0;overflow:auto"></section>
     <div class="messages" id="messages"></div>
 
     <div class="approval" id="progressView">
@@ -515,6 +516,7 @@
   </div>
 </div>
 
+<script src="/manual-checklist.js?v=1776"></script>
 <script>
 (function(){
   "use strict";
@@ -540,7 +542,7 @@
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;
   }
-  var CLIENT_BUILD = '20261127-notifications-1';
+  var CLIENT_BUILD = '20261128-manual-checklist-1';
   var POLL_MS = 5000;
   var pickleChat = new URLSearchParams(location.search).get('view') === 'pickles';
   function isPickleParticipant(name){ return name === '똑똑이' || /^피클[1-5]$/.test(name); }
@@ -757,6 +759,7 @@
       '<span class="cnt" id="progressBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
       '</button>';
     $('notificationTabs').innerHTML = state.rooms.map(function(r){return '<button data-notify-room=\"'+esc(r.slug)+'\" class=\"'+(r.slug===state.room?'active':'')+'\">'+esc(r.name)+(r.unread?'<span class=\"cnt\">'+r.unread+'</span>':'')+'</button>';}).join('');
+    html += '<button class="room'+(state.view==='manual-checklist'?' active':'')+'" id="manualChecklistBtn">☑️ 체크리스트</button>';
     elRoomList.innerHTML = html + '<a class="room" href="/?view=pickles">💛 피클 전용 대화방</a>';
     Array.prototype.forEach.call(elRoomList.querySelectorAll('.room'), function(btn){
       btn.addEventListener('click', function(){
@@ -765,6 +768,8 @@
     });
     var pb = elRoomList.querySelector('#progressBtn');
     if (pb) pb.addEventListener('click', showProgress);
+    var mb=elRoomList.querySelector('#manualChecklistBtn');
+    if(mb)mb.addEventListener('click',showManualChecklist);
   }
   function loadRooms(){
     if (pickleChat){
@@ -1253,7 +1258,24 @@
     if (s === 'rejected') return '반려됨';
     return s;
   }
+  var manualChecklistUI=null;
+  function showManualChecklist(){
+    state.view='manual-checklist';
+    document.body.classList.remove('nav-open');
+    $('roomDashboard').hidden=true;
+    elMessages.style.display='none';elComposer.style.display='none';
+    $('markReadBtn').style.display='none';$('readBar').style.display='none';
+    $('progressView').classList.remove('show');
+    $('manualChecklistView').hidden=false;
+    $('roomName').textContent='체크리스트';$('roomDesc').textContent='매일 할 일 · 오늘 할 일 · 직접 체크';
+    if(!manualChecklistUI)manualChecklistUI=window.MuseManualChecklist.mount($('manualChecklistView'),api);
+    else manualChecklistUI.load();
+    renderRooms();
+    var u=new URL(location.href);u.searchParams.set('view','checklist');history.replaceState(null,'',u);
+  }
   function showProgress(){
+    $('manualChecklistView').hidden=true;
+    clearManualLocation();
     state.view = 'progress';
     $('roomDashboard').hidden = true;
     document.body.classList.remove('nav-open');
@@ -1380,6 +1402,8 @@
     patchItem(stageEditingId, {stages:stages}).then(function(){ stageDialog.close(); }).catch(function(err){ stageDialog.querySelector('[data-stage-error]').textContent = '저장 실패 · ' + err.message; }).finally(function(){ save.disabled = false; });
   });
   function showRoomView(){
+    $('manualChecklistView').hidden=true;
+    clearManualLocation();
     state.view = 'room';
     renderRoomWorkspace();
     elMessages.style.display = '';
@@ -1392,6 +1416,9 @@
       $('roomName').textContent = cur.name;
       $('roomDesc').textContent = cur.description || '';
     }
+  }
+  function clearManualLocation(){
+    var u=new URL(location.href);if(u.searchParams.get('view')==='checklist'){u.searchParams.delete('view');history.replaceState(null,'',u);}
   }
   function loadChecklist(){
     return api('/api/checklist').then(function(d){
@@ -1592,6 +1619,7 @@
     loadMessages(true);
     if (!pickleChat){ loadChecklist(); loadRoomBoard(); renderRoomWorkspace(); }
     if (state.timer) clearInterval(state.timer);
+    if(!pickleChat&&new URLSearchParams(location.search).get('view')==='checklist')showManualChecklist();
     var tick = 0;
     state.timer = setInterval(function(){
       if (document.hidden) return;
@@ -1599,6 +1627,8 @@
       if(tick % 10 === 0) checkVersion();
       if (state.view === 'progress'){
         if (tick % 10 === 0) loadChecklist().catch(function(){});
+      } else if(state.view==='manual-checklist'){
+        if(tick%10===0)loadRooms().catch(function(){});
       } else {
         loadMessages(false);
         if (!pickleChat && tick % 10 === 0){ loadRooms().catch(function(){}); loadChecklist().catch(function(){}); loadRoomBoard(); }
@@ -1607,7 +1637,8 @@
     document.addEventListener('visibilitychange', function(){
       if (!document.hidden){
         checkVersion();
-        if (state.view === 'progress') loadChecklist();
+        if(state.view==='manual-checklist'){if(manualChecklistUI)manualChecklistUI.load();}
+        else if (state.view === 'progress') loadChecklist();
         else loadMessages(false);
       }
     });
