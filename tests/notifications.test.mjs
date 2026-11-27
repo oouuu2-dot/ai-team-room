@@ -38,3 +38,12 @@ test('build endpoint is public and notifications require authentication',async()
  assert.equal((await f.api.handleApi(req,f.env,new URL(req.url))).status,401);
  f.db.close();
 });
+test('new build shows the update button while the current build stays quiet',async()=>{
+ const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+ const code=html.slice(html.indexOf('  function checkVersion(){'),html.indexOf("  $('applyUpdate').onclick="));
+ for(const build of ['current','next']){
+  const banner={hidden:true};
+  const check=runInNewContext(code+'\ncheckVersion',{CLIENT_BUILD:'current',$:()=>banner,fetch:async()=>({json:async()=>({build})})});
+  await check();assert.equal(banner.hidden,build==='current');
+ }
+});
