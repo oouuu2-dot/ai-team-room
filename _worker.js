@@ -5,6 +5,7 @@
  * 인증: Authorization: Bearer <ROOM_KEY 또는 API_KEY>  (또는 X-Room-Key 헤더, ?key= 쿼리)
  */
 
+const UI_BUILD = '20261127-notifications-1';
 // ---------- 참여자(역할) 목록 ----------
 // 이름을 바꾸려면 여기와 index.html 의 SENDERS 배열을 함께 바꾸세요.
 const AGENTS = {
@@ -824,9 +825,43 @@ async function docsText(env, url) {
     .replaceAll('__FIRST_ROOM__', firstRoom ? firstRoom.slug : 'general');
 }
 
+let notificationIndexesReady = false;
+function botMentions(content, sender) {
+  const names = [];
+  for (const match of String(content || '').matchAll(/(?:^|[\s(])@(숏츠\.딸깍이|[가-힣A-Za-z0-9_~]+)/g)) {
+    const name = canonicalAgent(match[1]);
+    if (name !== '똑똑이' && name !== canonicalAgent(sender) && AGENTS[name] && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+async function notificationSnapshot(env, room, ids) {
+  if (!notificationIndexesReady) {
+    await env.DB.batch([
+      env.DB.prepare('create index if not exists messages_sender_latest on messages(sender, id desc)'),
+      env.DB.prepare('create index if not exists messages_direct_reply on messages(reply_to_id, sender)')
+    ]);
+    notificationIndexesReady = true;
+  }
+  const actors = await Promise.all(Object.entries(AGENTS).filter(([name]) => name !== '똑똑이').map(async ([name, meta]) => {
+    const row = await env.DB.prepare('select created_at from messages where sender in (?,?) order by id desc limit 1').bind(name, meta.emoji+' '+name).first();
+    return {name, emoji:meta.emoji, last_message_at:row?.created_at || null};
+  }));
+  if (!ids.length) return {ok:true, actors, requests:[]};
+  const placeholders = ids.map(() => '?').join(',');
+  const parents = await env.DB.prepare(`select id,sender,content from messages where room_slug=? and id in (${placeholders})`).bind(room,...ids).all();
+  const replies = await env.DB.prepare(`select reply_to_id,sender,created_at from messages where reply_to_id in (${placeholders})`).bind(...ids).all();
+  const requests = (parents.results || []).map(parent => ({id:parent.id, targets:botMentions(parent.content,parent.sender).map(name => {
+    const answered = (replies.results || []).filter(r => r.reply_to_id === parent.id && (canonicalAgent(r.sender) === name || r.sender === AGENTS[name].emoji+' '+name));
+    return {name, replied:answered.length>0, last_reply_at:answered.map(r=>r.created_at).sort().pop() || null};
+  })}));
+  return {ok:true, actors, requests};
+}
+
 async function handleApi(request, env, url) {
   const parts = url.pathname.split('/').filter(Boolean); // ['api', ...]
   const method = request.method.toUpperCase();
+
+  if (parts[1] === 'version' && method === 'GET') return json({ok:true,build:UI_BUILD});
 
   if (parts[1] === 'health') {
     let dbOk = false;
@@ -846,6 +881,15 @@ async function handleApi(request, env, url) {
       { ok: false, error: 'unauthorized', message: 'API 키가 필요합니다. Authorization: Bearer <API_KEY>' },
       401
     );
+  }
+
+  if (parts[1] === 'notifications' && method === 'GET') {
+    const room = url.searchParams.get('room') || 'general';
+    const raw = url.searchParams.get('ids') || '';
+    const ids = raw ? [...new Set(raw.split(',').map(Number))] : [];
+    if (ids.length > 60 || ids.some(id => !Number.isSafeInteger(id) || id < 1)) return json({ok:false,error:'invalid_message_ids'},400);
+    if (!await getRoom(env,room)) return json({ok:false,error:'room_not_found'},404);
+    return json(await notificationSnapshot(env,room,ids));
   }
 
   if (parts[1] === 'shorts-workroom') {

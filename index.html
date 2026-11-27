@@ -423,6 +423,7 @@
   .pickle-chat .topright a{color:#4d4620;font-size:12px;white-space:nowrap}
   .pickle-chat #livePill{display:inline-block;background:#fff8b5;color:#4d4620;border:0;font-size:11px}
   @media(max-width:520px){.pickle-chat .messages{padding:12px}.pickle-chat .topbar{padding:12px}.pickle-chat .msg .body{max-width:84%}.pickle-chat .topright{gap:5px;flex-direction:column}}
+  .notification-tabs{display:flex;gap:6px;overflow:auto;padding:8px 16px;flex-shrink:0;border-bottom:1px solid #eee}.notification-tabs button{white-space:nowrap;border:1px solid #ddd;background:transparent;border-radius:16px;padding:5px 10px;color:inherit}.notification-tabs .active{border-color:#d6336c}.notification-tabs .cnt{margin-left:5px}.bot-activity{flex-shrink:0;padding:4px 16px;font-size:12px}.bot-activity .actor-times{display:flex;gap:6px;flex-wrap:wrap;padding:8px 0}.actor-times span{border:1px solid #ddd;border-radius:8px;padding:4px 6px}.reply-state{font-size:12px;color:#996b00;margin-top:7px}.reply-state .answered{color:#22834a}.update-banner{flex-shrink:0;padding:10px 16px;background:#fff1b8;color:#3d2a00}.update-banner[hidden]{display:none}.update-banner button{margin-left:10px}.pickle-chat .notification-tabs,.pickle-chat .bot-activity{display:none}
 </style>
 </head>
 <body>
@@ -454,6 +455,9 @@
       </div>
     </header>
 
+    <div class="update-banner" id="updateBanner" role="status" hidden>새 버전이 준비됐어요.<button id="applyUpdate">새 버전 적용</button></div>
+    <nav class="notification-tabs" id="notificationTabs" aria-label="방별 새 글"></nav>
+    <details class="bot-activity"><summary>봇 마지막 메시지 시각</summary><div class="actor-times" id="actorTimes">불러오는 중…</div></details>
     <section class="room-dashboard" id="roomDashboard" aria-label="방 작업 현황" hidden></section>
     <div class="messages" id="messages"></div>
 
@@ -536,6 +540,7 @@
     for (var i = 0; i < SENDERS.length; i++){ if (SENDERS[i].name === v) return v; }
     return SENDERS[0].name;
   }
+  var CLIENT_BUILD = '20261127-notifications-1';
   var POLL_MS = 5000;
   var pickleChat = new URLSearchParams(location.search).get('view') === 'pickles';
   function isPickleParticipant(name){ return name === '똑똑이' || /^피클[1-5]$/.test(name); }
@@ -691,6 +696,39 @@
     window.open('/api/docs?key=' + encodeURIComponent(state.key), '_blank');
   });
 
+  var replySnapshot={}, notificationBusy=false, notificationAgain=false;
+  function mentionTargets(content,sender){
+    var result=[], re=/(?:^|[\s(])@(숏츠\.딸깍이|[가-힣A-Za-z0-9_~]+)/g, match;
+    while((match=re.exec(content||''))){var name=normalizeSender(match[1]);if(name!=='똑똑이'&&name!==sender&&result.indexOf(name)<0)result.push(name);}
+    return result;
+  }
+  function updateReplyStates(){
+    Array.prototype.forEach.call(elMessages.querySelectorAll('[data-reply-state]'),function(el){
+      var item=replySnapshot[el.getAttribute('data-reply-state')];
+      el.innerHTML=item?item.targets.map(function(t){return '<span class="'+(t.replied?'answered':'waiting')+'">'+esc(t.name)+' '+(t.replied?'답장 완료':'대기 중')+'</span>';}).join(' · '):'이전 멘션 · 상태 확인 대기';
+    });
+  }
+  function loadNotifications(){
+    if(!state.key)return Promise.resolve();
+    if(notificationBusy){notificationAgain=true;return Promise.resolve();}
+    notificationBusy=true;var room=state.room;
+    var ids=state.messages.filter(function(m){return m.sender===state.sender&&mentionTargets(m.content,m.sender).length;}).slice(-60).map(function(m){return m.id;});
+    return api('/api/notifications?room='+encodeURIComponent(room)+'&ids='+ids.join(',')).then(function(d){
+      if(room!==state.room)return;
+      (d.requests||[]).forEach(function(r){replySnapshot[r.id]=r;});updateReplyStates();
+      $('actorTimes').innerHTML=(d.actors||[]).map(function(a){var when=a.last_message_at?new Date(a.last_message_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'메시지 기록 없음';return '<span>'+esc(a.emoji+' '+a.name)+' · '+esc(when)+'</span>';}).join('');
+    }).catch(function(){ $('actorTimes').textContent='마지막 메시지 시각을 불러오지 못했습니다.'; }).then(function(){notificationBusy=false;if(notificationAgain){notificationAgain=false;return loadNotifications();}});
+  }
+  function checkVersion(){
+    return fetch('/api/version',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){if(d.build&&d.build!==CLIENT_BUILD)$('updateBanner').hidden=false;}).catch(function(){});
+  }
+  $('applyUpdate').onclick=function(){
+    if(state.attachment){setStatus(false,'첨부 파일을 전송하거나 취소한 뒤 새 버전을 적용해 주세요.');return;}
+    sessionStorage.setItem('muse_update_draft',JSON.stringify({room:state.room,text:elInput.value}));location.reload();
+  };
+  $('notificationTabs').onclick=function(e){var b=e.target.closest('[data-notify-room]');if(b)switchRoom(b.getAttribute('data-notify-room'));};
+  try{var savedDraft=JSON.parse(sessionStorage.getItem('muse_update_draft')||'null');if(savedDraft&&savedDraft.room===state.room){elInput.value=savedDraft.text;sessionStorage.removeItem('muse_update_draft');}}catch(e){}
+
   /* ---------- rooms ---------- */
   function renderSenders(){
     elSender.innerHTML = SENDERS.filter(function(s){ return !pickleChat || isPickleParticipant(s.name); }).map(function(s){
@@ -702,7 +740,7 @@
     if (pickleChat) return;
     var html = '<div class="label">회의실</div>';
     state.rooms.forEach(function(r){
-      var unread = (r.slug !== state.room) ? (r.unread || 0) : 0;
+      var unread = r.unread || 0;
       var badge = unread ? '<span class="cnt">' + unread + '</span>' : '';
       html += '<button class="room' + (r.slug === state.room ? ' active' : '') + (r.message_count || r.slug === 'shorts' ? '' : ' empty-room') + '" data-room="' + esc(r.slug) + '" title="' + esc(r.description || '') + '">' +
         '<span class="hash">#</span>' +
@@ -718,6 +756,7 @@
       '<span class="rdesc" style="display:block">결재 대기 · 스레드·릴스·카드뉴스 진행</span></span>' +
       '<span class="cnt" id="progressBadge"' + (pendingN ? '' : ' style="display:none"') + '>' + pendingN + '</span>' +
       '</button>';
+    $('notificationTabs').innerHTML = state.rooms.map(function(r){return '<button data-notify-room=\"'+esc(r.slug)+'\" class=\"'+(r.slug===state.room?'active':'')+'\">'+esc(r.name)+(r.unread?'<span class=\"cnt\">'+r.unread+'</span>':'')+'</button>';}).join('');
     elRoomList.innerHTML = html + '<a class="room" href="/?view=pickles">💛 피클 전용 대화방</a>';
     Array.prototype.forEach.call(elRoomList.querySelectorAll('.room'), function(btn){
       btn.addEventListener('click', function(){
@@ -735,6 +774,8 @@
     }
     return api('/api/rooms').then(function(d){
       state.rooms = d.rooms || [];
+      loadNotifications();
+      checkVersion();
       renderRooms();
       var cur = state.rooms.filter(function(r){ return r.slug === state.room; })[0];
       if (cur){
@@ -752,6 +793,7 @@
     loadRoomBoard();
     state.lastId = 0;
     state.messages = [];
+    state.loading = false;
     state.readMark = 0;
     state.replyTo = null; elReplyBar.hidden = true;
     localStorage.setItem('ai_team_room_room', slug);
@@ -817,6 +859,7 @@
         out += '<div><a class="att-file" href="' + attUrl + '" download="' + esc(m.attachment.filename) + '"><span>📄</span><b>' + esc(m.attachment.filename) + '</b><span>(' + kb + 'KB)</span></a></div>';
       }
     }
+    if(!pickleChat && m.sender===state.sender && mentionTargets(m.content,m.sender).length)out+='<div class=\"reply-state\" data-reply-state=\"'+m.id+'\" title=\"답장 완료는 봇 응답 확인이며 작업 완료를 뜻하지 않습니다.\">답장 상태 확인 중…</div>';
     out += '<button class="replybtn" data-reply="' + m.id + '">답글</button>' +
       '</div></div>';
     return out;
@@ -901,20 +944,27 @@
     state.messages = state.messages.concat(list);
     if (stick) scrollBottom(true);
     placeDivider();
+    updateReplyStates();
   }
+  var messageGeneration=0;
   function loadReadMark(){
     if (pickleChat) return Promise.resolve();
-    return api('/api/rooms/' + encodeURIComponent(state.room) + '/read-mark').then(function(d){
+    var room=state.room;
+    return api('/api/rooms/' + encodeURIComponent(room) + '/read-mark').then(function(d){
+      if(room!==state.room)return;
       state.readMark = d.last_read_id || 0;
     }).catch(function(){ state.readMark = 0; });
   }
   function loadMessages(initial){
     if (state.loading) return Promise.resolve();
     state.loading = true;
+    var requestedRoom = state.room, generation=++messageGeneration;
     var ready = initial ? loadReadMark() : Promise.resolve();
     return ready.then(function(){
-      var q = '/api/rooms/' + encodeURIComponent(state.room) + '/messages?limit=60' + (state.lastId ? '&after=' + state.lastId : '');
+      if(requestedRoom!==state.room||generation!==messageGeneration)return;
+      var q = '/api/rooms/' + encodeURIComponent(requestedRoom) + '/messages?limit=60' + (state.lastId ? '&after=' + state.lastId : '');
       return api(q).then(function(d){
+        if(requestedRoom!==state.room||generation!==messageGeneration)return;
         var list = d.messages || [];
         if (initial && !state.lastId){
           state.messages = list;
@@ -924,11 +974,13 @@
           state.lastId = list[list.length - 1].id;
           appendMessages(list);
         }
+        if(initial||list.length)loadNotifications();
         setStatus(true, '연결됨 · ' + kstTime(new Date().toISOString()));
         if (pickleChat) $('livePill').textContent = '연결됨 · 10초 확인';
         state.loading = false;
       });
     }).catch(function(err){
+      if(requestedRoom!==state.room||generation!==messageGeneration)return;
       state.loading = false;
       if (err.status === 401){
         if (state.timer){ clearInterval(state.timer); state.timer = null; }
@@ -1086,7 +1138,8 @@
   elSender.addEventListener('change', function(){
     state.sender = elSender.value;
     localStorage.setItem(pickleChat ? 'ai_team_pickles_sender' : 'ai_team_room_sender', state.sender);
-    if (pickleChat) renderAll();
+    renderAll();
+    loadNotifications();
   });
 
   /* ---------- 결재 ---------- */
@@ -1543,6 +1596,7 @@
     state.timer = setInterval(function(){
       if (document.hidden) return;
       tick++;
+      if(tick % 10 === 0) checkVersion();
       if (state.view === 'progress'){
         if (tick % 10 === 0) loadChecklist().catch(function(){});
       } else {
@@ -1552,6 +1606,7 @@
     }, POLL_MS);
     document.addEventListener('visibilitychange', function(){
       if (!document.hidden){
+        checkVersion();
         if (state.view === 'progress') loadChecklist();
         else loadMessages(false);
       }
