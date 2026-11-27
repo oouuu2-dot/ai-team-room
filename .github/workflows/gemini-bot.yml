@@ -1,18 +1,47 @@
 name: Gemini Bot
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - gemini_bot.py
+      - tests/test_gemini_bot.py
+      - .github/workflows/gemini-bot.yml
+concurrency:
+  group: gemini-room-bridge
+  cancel-in-progress: false
+permissions:
+  contents: read
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install requests
-      - run: python gemini_bot.py
+      - name: Test bridge
+        run: python -m unittest discover -s tests -p test_gemini_bot.py
+      - name: Restore pending calls
+        uses: actions/cache/restore@v4
+        with:
+          path: .gemini-state.json
+          key: gemini-queue-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: gemini-queue-v1-
+      - name: Validate key and model; answer queued calls
+        run: python gemini_bot.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ROOM_KEY: ${{ secrets.ROOM_KEY }}
+          GEMINI_MODEL: gemini-2.5-flash-lite
+          GEMINI_INITIAL_AFTER: '1400'
+      - name: Preserve pending calls even after API errors
+        if: always() && hashFiles('.gemini-state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .gemini-state.json
+          key: gemini-queue-v1-${{ github.run_id }}-${{ github.run_attempt }}
